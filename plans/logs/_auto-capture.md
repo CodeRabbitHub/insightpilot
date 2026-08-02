@@ -100,3 +100,60 @@ Date:   Sun Aug 2 13:22:38 2026 +0530
  tests/.gitkeep                     |   0
  38 files changed, 1912 insertions(+)
 ```
+
+## Commit at 2026-08-02 14:21
+```
+commit 4e1745b96d7a28be2198042ef65dddf9bae0bd0c
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 14:21:35 2026 +0530
+
+    Foundation DB + seed: Postgres 16 + pgvector, Olist data, RO user
+    
+    docker compose (single db service) brings up Postgres 16 with pgvector;
+    scripts/seed.py idempotently loads the 9 Olist CSVs into typed tables
+    under an `olist` schema and provisions a SELECT-only `olist_ro` role;
+    scripts/verify_seed.py is the done-check (row counts vs CSVs, vector
+    extension, olist_ro permission enforcement). Gate 2 accepted, see
+    artifacts/reviews/2026-08-02-foundation-db-seed.md.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ .env.example                                       |   7 ++++++
+ .gitignore                                         |   2 ++
+ artifacts/reviews/2026-08-02-foundation-db-seed.md |  95 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ data/README.md                                     |  26 +++++++++++++++++++
+ docker-compose.yml                                 |  16 ++++++++++++
+ plans/briefs/2026-08-02-foundation-db-seed.md      |  47 +++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                        |  53 +++++++++++++++++++++++++++++++++++++++
+ requirements.txt                                   |   2 ++
+ scripts/seed.py                                    | 204 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ scripts/verify_seed.py                             |  86 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/_pg_helpers.py                               | 123 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_data_readme.py                          |  49 ++++++++++++++++++++++++++++++++++++
+ tests/test_docker_compose.py                       |  76 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_env_example.py                          |  45 +++++++++++++++++++++++++++++++++
+ tests/test_olist_ro_permissions.py                 | 144 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_require_env.py                          |  30 ++++++++++++++++++++++
+ tests/test_seed_idempotency.py                     |  79 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_seed_schema.py                          |  70 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_verify_seed_script.py                   |  43 ++++++++++++++++++++++++++++++++
+ 19 files changed, 1197 insertions(+)
+```
+
+## Commit at 2026-08-02 14:37
+```
+commit 76eda923274618a1365878bb605386c4f3f75d79
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 14:37:42 2026 +0530
+
+    Handoff: foundation slice done, next brief is catalog sync CLI
+    
+    Records verified state of the Foundation DB + seed slice and writes the
+    full brief for the next slice (app.catalog.sync introspection, LLM
+    descriptions deferred to a later slice).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ HANDOFF.md | 159 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------------------------------
+ 1 file changed, 117 insertions(+), 42 deletions(-)
+```
