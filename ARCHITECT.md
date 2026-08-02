@@ -31,6 +31,10 @@ Diagrams and detail: PRD.md §5-6.
   is roadmap, not v1.
 - One strong model (Claude Sonnet class) for every LLM step; provider
   embeddings API for ~200 chunks — self-hosting a model is not justified.
+- Voyage AI for embeddings (amendment, 2026-08-02) — Anthropic's
+  recommended embeddings partner, pairs naturally with the existing
+  Claude Sonnet usage; names the "provider embeddings API" decision above
+  now that M3's retrieval work needs one picked.
 - Prompts are versioned repo files (prompts/*.md) — reviewable, testable,
   diffable; never inline strings.
 - LLM JSON outputs validated by Pydantic with one retry, falling back to

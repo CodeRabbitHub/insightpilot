@@ -1,165 +1,165 @@
 # Handoff
 
 Date: 2026-08-02
-Slice just completed: plans/briefs/2026-08-02-validate-sql.md +
-  plans/logs/2026-08-02-validate-sql.md (commit cf0b452)
+Slice just completed: plans/briefs/2026-08-02-execute-sql.md +
+  plans/logs/2026-08-02-execute-sql.md (commit 8fa281f)
 
 ## State of the work
-- M2 Pipeline v0 now has its second link fully proven: question → SQL →
-  **validate** (real sqlglot parsing, not regex). Still no execution.
-- `app/pipeline/validate_sql.py` — new module exporting `validate_sql(sql,
-  cur)`. Parses with sqlglot's Postgres dialect (`parse_single_select`):
-  rejects a parse failure, more than one statement (after filtering the
-  `None` artifact from a trailing semicolon), or anything that isn't an
-  `exp.Select`. `check_table_references` walks every `exp.Table` node and
-  requires its combined qualifier (`table.catalog` + `table.db` — the
-  only two naming-qualifier fields `exp.Table` exposes, confirmed via
-  `arg_types`) to equal exactly `"olist"` if present at all, and the
-  basename to be a real table in `app.catalog_tables` (case-insensitive,
-  CTE names exempted only when truly unqualified). `check_column_references`
-  delegates to `sqlglot.optimizer.qualify.qualify(...,
-  validate_qualify_columns=True)` for real scope-aware column resolution
-  (correctly handles per-table ambiguity and `ORDER BY <output_alias>`,
-  which the old regex tokenizer couldn't). `fetch_catalog_schema(cur)`
-  builds `{table_name: {column_name: data_type}}` live from
-  `app.catalog_tables`/`app.catalog_columns` — never hardcoded.
-- `app/pipeline/verify_generate_sql.py` — now calls `validate_sql(sql,
-  cur)` instead of the deleted `check_references`/`fetch_valid_names`/
-  `SQL_STOPWORDS`/regex constants; shrank from 125 to 34 lines. Same
-  PASSED/FAILED/exit-code contract as before.
-- `requirements.txt` gained `sqlglot==30.14.0` (ARCHITECT.md's own
-  defense-in-depth wording pre-approved it).
-- Four successive no-slop-reviewer passes on `check_table_references`
-  each found one more real validation bypass before the design converged
-  on an allowlist (qualifier must equal exactly `"olist"`, combining every
-  qualifier field the library exposes) rather than a blocklist (reject
-  specific known-bad values): a bare cross-schema reference
-  (`pg_catalog.products`), a CTE name masking a qualified reference to
-  itself, a `catalog..table` double-dot form that bypassed a `.db`-only
-  check, and (non-bypass, fail-closed) a table-valued-function call
-  producing an uninformative message plus a case-folding mismatch
-  wrongly rejecting valid uppercase references. Every fix has its own
-  regression test in `ValidateSqlTests`. Full history in the gate record.
-- `templates/no-slop.md` gained a new line under Untested edges: for
-  identifier/security validation logic, prefer an allowlist over a
-  blocklist and enumerate every field a value can carry — promoted after
-  this exact bug shape recurred four times in one function this slice.
-- A pre-existing, unrelated test
-  (`test_llm_description_setup.py::test_requirements_gains_no_other_new_dependencies`)
-  hardcoded a dependency allow-list from an earlier slice and broke when
-  `sqlglot` was added; per explicit user decision, its allow-list was
-  extended (not weakened) with a comment explaining why.
-- 91 tests pass (`python -m unittest discover tests`, via the project
-  `.venv`) — 86 from prior slices (minus 6 deleted `CheckReferencesTests`,
-  plus net-new coverage) + `ValidateSqlTests`' 11 cases covering the
-  positive fixed-question SQL and every bug found above.
+- **M2 Pipeline v0 is complete**: question → SQL → validate → execute →
+  printed answer, fully proven end to end for the one fixed question.
+- `app/pipeline/execute_sql.py` — new module exporting `cap_limit(sql,
+  cap=1000)` (pure, no DB: edits the sqlglot-parsed statement's `Limit`
+  node directly — adds a cap if none exists, tightens a looser one, never
+  loosens a tighter one; raises `SqlValidationError` on a non-literal
+  `LIMIT` expression it can't safely compare) and async `execute_sql(sql)`
+  (opens one `asyncpg` connection authenticated as `OLIST_RO_USER`/
+  `OLIST_RO_PASSWORD` — never the owner role — sets `SET LOCAL
+  statement_timeout = '10s'` inside a transaction, executes the capped
+  SQL, returns rows as `list[dict]`, always closes the connection).
+- `app/pipeline/answer.py` — new module: `get_answer()` chains
+  `generate_sql()` → (owner-role `connect()`/cursor) `validate_sql()` →
+  `execute_sql()`, returning `(sql, rows)`; `print_answer(sql, rows)` is
+  the shared presentation function reused by both `answer.main()` and
+  `verify_answer.py` (extracted during Gate 2 to kill a duplicated print
+  block).
+- `app/pipeline/verify_answer.py` — new done-check CLI, same
+  PASSED/FAILED/exit-code contract as `verify_generate_sql.py`.
+- `requirements.txt` gained `asyncpg==0.31.0` (ARCHITECT.md's own
+  two-pool/blast-radius-isolation wording pre-approved it, same precedent
+  as `sqlglot` the slice before).
+- The no-slop-reviewer pass found three issues, all fixed before Gate 2:
+  an unhandled non-literal `LIMIT` expression in `cap_limit` (now fails
+  closed with `SqlValidationError` + a regression test), a duplicated
+  print block between `answer.py`/`verify_answer.py` (extracted to
+  `print_answer()`), and a duplicated `DIALECT` constant in
+  `execute_sql.py` (now imported from `validate_sql.py`, which it already
+  imports `parse_single_select` from).
+- `tests/test_llm_description_setup.py`'s hardcoded dependency allow-list
+  extended again (same precedent as `sqlglot`) to include `asyncpg`.
+- **ARCHITECT.md amended**: Voyage AI named as the embeddings provider
+  (the "provider embeddings API for ~200 chunks" line was previously
+  unpinned) — decided explicitly this session ahead of M3's retrieval
+  work, which needs one picked.
+- 104 tests pass (`python -m unittest discover tests`, via the project
+  `.venv`) — 91 from prior slices + 13 new (6 pure `cap_limit` cases
+  including a non-literal-LIMIT regression, 2 real-DB read-only-role
+  integration tests, 1 statement_timeout-cancellation test, 3 CLI
+  done-check tests, plus the extended dependency-allowlist assertion).
 
 ## Proof
 ```
-$ python -m app.pipeline.verify_generate_sql
-Generated SQL:
-SELECT p.product_category_name, COUNT(DISTINCT oi.order_id) AS num_orders FROM olist.order_items oi JOIN olist.products p ON oi.product_id = p.product_id GROUP BY p.product_category_name ORDER BY num_orders DESC LIMIT 5
+$ python -m app.pipeline.verify_answer
+SQL:
+SELECT p.product_category_name, COUNT(DISTINCT oi.order_id) AS order_count FROM olist.order_items oi JOIN olist.products p ON oi.product_id = p.product_id GROUP BY p.product_category_name ORDER BY order_count DESC LIMIT 5
 
-verify_generate_sql: PASSED
+Rows:
+{'product_category_name': 'cama_mesa_banho', 'order_count': 9417}
+{'product_category_name': 'beleza_saude', 'order_count': 8836}
+{'product_category_name': 'esporte_lazer', 'order_count': 7720}
+{'product_category_name': 'informatica_acessorios', 'order_count': 6689}
+{'product_category_name': 'moveis_decoracao', 'order_count': 6449}
+
+verify_answer: PASSED
 
 $ python -m unittest discover tests
-...........................................................................................
+........................................................................................................
 ----------------------------------------------------------------------
-Ran 91 tests in 55.546s
+Ran 104 tests in 79.799s
 
 OK
 ```
 
 ## Open questions / known issues
-- Test runner: still `unittest`, still via the project `.venv`. The next
-  slice adds `asyncpg`, which is inherently async — plain `unittest`
-  supports this natively via `unittest.IsolatedAsyncioTestCase` (stdlib,
-  no new test dependency needed), so this doesn't force the long-carried
-  "move to pytest" decision yet; flag if that changes.
+- Test runner: still `unittest`, still via the project `.venv`. No new
+  test dependency was needed this slice either
+  (`unittest.IsolatedAsyncioTestCase` covered the async integration
+  tests) — the long-carried "move to pytest" decision remains untouched.
 - Lint/type tooling (`ruff`, `mypy`) named in CLAUDE.md's Commands still
-  aren't installed in the project `.venv` — carried over, not blocking.
-- `fetch_catalog_schema(cur)` issues two fresh queries against the
-  catalog on every single `validate_sql()` call, no caching — fine at
-  current CLI scale (one call per run), revisit only if this becomes a
-  real latency concern once M4's API wraps this pipeline.
-- `validate_sql` checks that every referenced identifier *exists*; it
-  does not check semantic correctness (e.g. a join that's technically
-  valid SQL but wrong business logic) — that's the LLM's job and the
-  eval's job, not this validation layer's, per ARCHITECT.md's layering.
+  aren't installed in the project `.venv` — carried over again, not
+  blocking.
+- `execute_sql()` opens and closes a brand-new asyncpg connection on
+  every call, no pooling — correct for this CLI-only slice per the
+  brief's explicit constraint; M4's FastAPI shape is where
+  `asyncpg.create_pool` lifecycle management actually belongs.
+- Voyage AI was picked as the embeddings provider and amended into
+  ARCHITECT.md this session, but no code against it exists yet — the
+  `VOYAGE_API_KEY` env var, the `voyageai` dependency, and the embeddings
+  storage table are all still to be built, starting with the next slice.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-Execute the validated SQL for real against a new read-only `asyncpg`
-connection (using the already-provisioned `OLIST_RO_USER`/
-`OLIST_RO_PASSWORD`), with a hard `LIMIT 1000` cap and a 10s
-`statement_timeout` injected first — ARCHITECT.md's defense-in-depth
-layer 3 — and print the fixed question's actual result rows. This
-completes M2 Pipeline v0's full chain (question → SQL → validate →
-execute → printed answer) for the one fixed question.
+For the fixed question, `generate_sql()`'s schema context comes from a
+pgvector top-k similarity search over embedded table descriptions instead
+of every table's full context — the first working link of M3's retrieval
+work.
 
 Constraints:
-New dependency, pre-approved by ARCHITECT.md's own wording ("a separate
-asyncpg pool with a SELECT-only user exclusively for generated SQL") —
-`asyncpg` only, pinned in `requirements.txt` to whatever version `pip
-install` resolves, confirmed at Gate 1. The asyncpg connection MUST use
-`OLIST_RO_USER`/`OLIST_RO_PASSWORD` (never `POSTGRES_USER`/
-`POSTGRES_PASSWORD`) — blast-radius isolation via the read-only grant is
-the product's core safety property (ARCHITECT.md), reusing
-`POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` for the rest of the
-connection params. Before executing, inject a `LIMIT 1000` cap — only if
-the SQL has no `LIMIT` or a looser one than 1000, never loosen an
-existing tighter `LIMIT` (the fixed question's `LIMIT 5` must survive
-untouched) — reusing sqlglot (already a dependency) to modify the parsed
-statement rather than string-munging SQL text. Set `statement_timeout`
-to 10s scoped to just this query (e.g. `SET LOCAL statement_timeout` inside
-an explicit transaction), not a global/session-wide setting. A full
-persistent connection pool (`asyncpg.create_pool` reused across many
-requests) is the eventual FastAPI shape (M4) — for this CLI-only slice, a
-single connection opened and closed per run is sufficient; don't build
-pool lifecycle management prematurely. Still only the one
-`FIXED_QUESTION` from `generate_sql.py` — no arbitrary/multi-question
-support. No chart or natural-language explanation step (`analyze.md`,
-later milestone) — "printed answer" means the raw result rows.
+New dependency `voyageai` (pinned in `requirements.txt` to whatever `pip
+install` resolves), per this session's ARCHITECT.md amendment naming
+Voyage AI as the embeddings provider — confirmed again at Gate 1. New
+env var `VOYAGE_API_KEY` added to `.env.example` (and `.env`, gitignored).
+Embeddings are stored in a new `app`-schema table using the pgvector
+extension already installed by M1's seed (`CREATE EXTENSION IF NOT EXISTS
+vector` already runs in `scripts/seed.py`) — no new vector store, per
+ARCHITECT.md's "one PostgreSQL instance, three concerns" decision. Embed
+the exact same per-table `description` text `app/catalog/describe.py`
+already generates and stores in `app.catalog_tables` — no new text
+source, no duplicate description-generation logic. Retrieval is a top-k
+pgvector cosine-distance (`<=>`) query against the fixed question's own
+embedding (k value proposed at Gate 1 — note only 9 olist tables exist
+total, so k should be small, e.g. 3-5). `generate_sql.py`'s
+`build_schema_context()` is now explicitly IN scope to change (unlike
+every prior slice, which forbade touching `generate_sql.py`) — this
+slice's whole point is changing how it sources context. Still only the
+one `FIXED_QUESTION` — no arbitrary-question CLI support yet. No
+re-embedding staleness/cache-invalidation logic beyond what `sync.py`/
+`describe.py` already do — embedding runs once via a new idempotent
+script (mirroring `sync.py`/`describe.py`'s upsert pattern), not on every
+`generate_sql()` call.
 
 Inputs:
-ARCHITECT.md's defense-in-depth layer 3 (LIMIT 1000 + statement_timeout
-10s) and two-pool/blast-radius-isolation decision; PLAN.md's M2
-definition; `app/pipeline/generate_sql.py`'s `generate_sql()` and
-`app/pipeline/validate_sql.py`'s `validate_sql(sql, cur)` as the two
-already-built upstream steps; `.env.example`'s `OLIST_RO_USER`/
-`OLIST_RO_PASSWORD` (provisioned by M1's seed, already granted
-SELECT-only per `tests/test_olist_ro_permissions.py`); this session's
-proof output (5 rows, strictly descending) as the sanity-check reference
-for the new done-check.
+ARCHITECT.md's amended embeddings-provider decision (Voyage AI) and its
+pgvector/one-postgres-instance decision; `app/catalog/describe.py`'s
+existing table descriptions (the text to embed, already live in
+`app.catalog_tables.description`); `app/pipeline/generate_sql.py`'s
+`build_schema_context()` (the function being changed) and
+`FIXED_QUESTION`; `.env.example` (gains `VOYAGE_API_KEY`); `scripts/
+seed.py`'s existing `CREATE EXTENSION IF NOT EXISTS vector` (pgvector is
+already installed, not newly added this slice).
 
 Outputs:
-- `requirements.txt` gains `asyncpg` (pinned).
-- A new module (exact path proposed at Gate 1, e.g.
-  `app/pipeline/execute_sql.py`) exporting an async `execute_sql(sql)` (or
-  similar): opens an `OLIST_RO_USER` asyncpg connection, injects the
-  LIMIT cap via sqlglot, sets the scoped statement_timeout, executes,
-  returns the result rows, closes the connection.
-- A new end-to-end runner + done-check (exact names proposed at Gate 1,
-  e.g. `app/pipeline/answer.py` + `app/pipeline/verify_answer.py`)
-  chaining `generate_sql()` → `validate_sql()` → `execute_sql()` and
-  printing the fixed question's real answer rows.
-- Tests: the LIMIT-injection logic's three cases (no `LIMIT` → 1000
-  added; looser `LIMIT` → capped to 1000; tighter `LIMIT` → left
-  untouched) tested directly against the pure sqlglot-modification logic;
-  a real end-to-end test that runs the new CLI and confirms actual rows
-  come back through the `OLIST_RO_USER` role (proving the read-only path
-  is real, not asserted).
+- `requirements.txt` gains `voyageai` (pinned); `.env.example` gains
+  `VOYAGE_API_KEY`.
+- New DDL: an `app`-schema table storing one embedding vector per
+  catalog table (exact name/shape proposed at Gate 1, e.g.
+  `app.catalog_embeddings(table_id, embedding vector(N))`).
+- A new idempotent module/CLI (exact names at Gate 1, e.g.
+  `app/catalog/embed.py` + `verify_embed.py`) that embeds every table's
+  `description` via Voyage AI and upserts into the new table, mirroring
+  `sync.py`/`describe.py`'s "safe to re-run" shape.
+- `generate_sql.py`'s `build_schema_context()` (or a new function it
+  calls) now embeds the fixed question, runs a pgvector top-k query
+  against the new table, and builds context from only the retrieved
+  tables — not every table in the catalog.
+- Tests: retrieval returns a real, plausible top-k list for the fixed
+  question (e.g. asserting `order_items`/`products` rank in the top-k,
+  since the fixed question is about product categories and orders,
+  never a hardcoded full-table-list check); the embed script is
+  idempotent across two runs (mirroring `test_catalog_sync.py`'s/
+  `test_seed_idempotency.py`'s pattern).
 
 Done-check:
-`python -m app.pipeline.verify_answer` (or whatever name Gate 1 confirms)
-exits 0 and prints the fixed question's real result rows, executed via
-the read-only asyncpg connection — paste its output. Separately, a test
-run demonstrates all three LIMIT-injection cases behave as specified
-above.
+`python -m app.pipeline.verify_generate_sql` (unchanged command) still
+exits 0 and produces the same-shaped correct SQL for the fixed question,
+now sourced from retrieved (not full) schema context — paste output.
+Separately, a test run demonstrates retrieval actually returns a
+real top-k subset (fewer than all 9 tables) containing the tables the
+fixed question needs.
 
 Out-of-scope:
-The `analyze.md` chart/explanation step, the repair loop, the business
-glossary (F5/M3), retrieval/pgvector (M3), FastAPI/frontend (M4/M5), CI,
-persistent connection pooling reused across multiple requests, arbitrary/
-multi-question CLI support, changing `generate_sql.py`'s or
-`validate_sql.py`'s existing behavior.
+Business glossary retrieval (F5, a later M3 slice), the one-shot repair
+loop, the eval harness (`evals/questions.yaml`, a later M3 slice),
+FastAPI/frontend (M4/M5), CI, arbitrary/multi-question support beyond
+`FIXED_QUESTION`, changing `validate_sql.py`/`execute_sql.py`/
+`answer.py`/`verify_answer.py`'s existing behavior, re-embedding
+staleness/cache-invalidation logic.

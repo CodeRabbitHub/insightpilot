@@ -430,3 +430,63 @@ Date:   Sun Aug 2 19:29:21 2026 +0530
  tests/test_verify_generate_sql_script.py     | 328 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------
  7 files changed, 551 insertions(+), 190 deletions(-)
 ```
+
+## Commit at 2026-08-02 19:39
+```
+commit 43b7b5b9a0323aea8b9fadc6cb08831417c92596
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 19:39:10 2026 +0530
+
+    Capture + handoff: sqlglot validator slice done, next brief is asyncpg execution
+    
+    Slice log for the sqlglot-SQL-validator slice (commit cf0b452), a new
+    no-slop.md checklist line (identifier/security validation should be an
+    allowlist, not a blocklist -- promoted after the same bug shape recurred
+    four times in one function this slice), and HANDOFF.md rewritten with
+    this session's verified state plus the next brief: execute the validated
+    SQL for real via a new read-only asyncpg connection with LIMIT/timeout
+    injection, completing M2 Pipeline v0's full chain.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ HANDOFF.md                            | 275 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++---------------------------------------------------------------------------------------
+ plans/logs/2026-08-02-validate-sql.md |  94 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md           |  69 +++++++++++++++++++++++++++++++++++++++++
+ templates/no-slop.md                  |   9 ++++++
+ 4 files changed, 301 insertions(+), 146 deletions(-)
+```
+
+## Commit at 2026-08-02 20:39
+```
+commit 8fa281fb853679136cd76a4f2d89a9a4c2b9c2a2
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 20:39:18 2026 +0530
+
+    Execute validated SQL for real via a read-only asyncpg connection
+    
+    Completes M2 Pipeline v0's full chain (question -> SQL -> validate ->
+    execute -> printed answer) for the fixed question. execute_sql.py caps
+    LIMIT to 1000 by editing the sqlglot AST (never loosening a tighter
+    existing LIMIT) and executes through a fresh asyncpg connection
+    authenticated as OLIST_RO_USER with a query-scoped 10s statement_timeout;
+    answer.py chains generate_sql -> validate_sql -> execute_sql; verify_answer.py
+    is the done-check CLI. Gate 2 record: artifacts/reviews/2026-08-02-execute-sql.md.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ app/pipeline/answer.py                      |  45 +++++++++++++++++++++++++++++++++++++++++++++
+ app/pipeline/execute_sql.py                 |  55 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/pipeline/verify_answer.py               |  31 +++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-02-execute-sql.md | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-execute-sql.md      |  77 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ requirements.txt                            |   1 +
+ tests/_answer_helpers.py                    |  29 +++++++++++++++++++++++++++++
+ tests/test_execute_sql_limit_cap.py         | 155 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_execute_sql_ro_role.py           | 109 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_execute_sql_statement_timeout.py |  42 ++++++++++++++++++++++++++++++++++++++++++
+ tests/test_llm_description_setup.py         |   5 +++++
+ tests/test_verify_answer_script.py          |  94 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 12 files changed, 778 insertions(+)
+```
