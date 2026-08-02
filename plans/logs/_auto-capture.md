@@ -262,3 +262,38 @@ Date:   Sun Aug 2 15:48:53 2026 +0530
  HANDOFF.md | 238 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------------------
  1 file changed, 138 insertions(+), 100 deletions(-)
 ```
+
+## Commit at 2026-08-02 16:49
+```
+commit a657fd6f03eff45226509fd83257ccbbe0602479
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 16:49:10 2026 +0530
+
+    LLM table descriptions: describe.py generates + caches per-table Claude descriptions
+    
+    Finishes PRD F4/M1: one Claude Sonnet call per catalog_tables row, validated
+    via Pydantic with one retry, skipping already-described rows so a second
+    run costs zero LLM calls. Required changing sync.py from TRUNCATE to an
+    UPSERT on table_name so re-syncing the olist schema never wipes a cached
+    description.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ .env.example                                           |   2 ++
+ app/catalog/describe.py                                | 171 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/catalog/sync.py                                    |  35 +++++++++++++++++-----
+ app/catalog/verify_describe.py                         |  48 +++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-02-llm-table-descriptions.md | 137 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-llm-table-descriptions.md      |  67 +++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                            |  90 +++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ prompts/table_description.md                           |  24 +++++++++++++++
+ requirements.txt                                       |   2 ++
+ tests/_describe_helpers.py                             |  58 +++++++++++++++++++++++++++++++++++
+ tests/test_catalog_sync.py                             |  58 +++++++++++++++++++++++++++--------
+ tests/test_describe_cli.py                             | 241 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_env_example.py                              |  17 +++++++++++
+ tests/test_llm_description_setup.py                    | 109 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_verify_describe_script.py                   | 113 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 15 files changed, 1153 insertions(+), 19 deletions(-)
+```
