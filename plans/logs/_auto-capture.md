@@ -490,3 +490,71 @@ Date:   Sun Aug 2 20:39:18 2026 +0530
  tests/test_verify_answer_script.py          |  94 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  12 files changed, 778 insertions(+)
 ```
+
+## Commit at 2026-08-02 20:46
+```
+commit ce458f5abcebdd9cd6906dab5b3e853b677182c6
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 20:46:48 2026 +0530
+
+    Capture + handoff: execute-sql slice done, next brief is pgvector schema retrieval
+    
+    Slice log for the read-only asyncpg execution slice (commit 8fa281f), an
+    ARCHITECT.md amendment naming Voyage AI as the embeddings provider (M3's
+    retrieval work needs one picked), and HANDOFF.md rewritten with this
+    session's verified state plus the next brief: embed table descriptions
+    into pgvector and swap generate_sql.py's schema context from
+    whole-catalog to top-k retrieval, the first link of M3.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ ARCHITECT.md                         |   4 +++
+ HANDOFF.md                           | 268 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------
+ plans/logs/2026-08-02-execute-sql.md |  80 +++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md          |  60 +++++++++++++++++++++++++++++++++++++
+ 4 files changed, 278 insertions(+), 134 deletions(-)
+```
+
+## Commit at 2026-08-02 22:40
+```
+commit 92c76d9c690b01ff75e7f52c018e42391d179447
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 22:40:14 2026 +0530
+
+    pgvector schema retrieval: swap generate_sql's context from full catalog to top-k
+    
+    app/catalog/embed.py embeds each table's existing LLM description via
+    Voyage AI (voyage-3.5, 1024-dim) and upserts into a new pgvector table
+    app.catalog_embeddings, idempotent like sync.py/describe.py; verify_embed.py
+    is the matching done-check CLI. generate_sql.py's build_schema_context()
+    now takes a pre-fetched table list instead of the whole catalog, fed by a
+    new retrieve_relevant_tables() that embeds the fixed question and runs a
+    pgvector top-k cosine-distance query (k=5 of 9 tables). Vector values move
+    through plain psycopg2 as cast text literals -- no new pgvector python
+    dependency, only voyageai (pinned, ARCHITECT.md's Voyage AI amendment).
+    
+    embed_text() gained a bounded rate-limit retry/backoff after this
+    session's real Voyage account tripped its 3 RPM free-tier limit during
+    the full test suite run; covered by dedicated fake-client unit tests
+    added after the no-slop pass flagged the gap. Gate 2 record:
+    artifacts/reviews/2026-08-02-pgvector-schema-retrieval.md.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ .env.example                                              |   1 +
+ app/catalog/embed.py                                      | 117 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/catalog/verify_embed.py                               |  51 +++++++++++++++++++++++++++++++
+ app/pipeline/generate_sql.py                              |  28 ++++++++++++++---
+ artifacts/reviews/2026-08-02-pgvector-schema-retrieval.md | 174 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-pgvector-schema-retrieval.md      |  74 +++++++++++++++++++++++++++++++++++++++++++++
+ requirements.txt                                          |   1 +
+ tests/_embed_helpers.py                                   |  63 +++++++++++++++++++++++++++++++++++++++
+ tests/test_catalog_embed.py                               | 234 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_env_example.py                                 |   5 ++++
+ tests/test_generate_sql_cli.py                            | 100 +++++++++++++++++++++++++++++++++++++++++++++++--------------
+ tests/test_llm_description_setup.py                       |   5 ++++
+ tests/test_verify_embed_script.py                         | 126 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 13 files changed, 953 insertions(+), 26 deletions(-)
+```
