@@ -172,3 +172,93 @@ Date:   Sun Aug 2 14:37:54 2026 +0530
  plans/logs/_auto-capture.md                 | 57 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  2 files changed, 122 insertions(+)
 ```
+
+## Commit at 2026-08-02 14:40
+```
+commit dbc77f10c595817bfe706715ba5e228d722134ea
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 14:40:26 2026 +0530
+
+    Fix stop_verify hook to use project .venv, not the harness's own venv
+    
+    sys.executable inside a hook resolves to whatever interpreter launched
+    it, which on this machine is the Claude Code harness's isolated internal
+    venv (no pip, no project deps) -- not this project's Python environment.
+    Once slice 1 added real dependencies (psycopg2-binary, python-dotenv),
+    the hook's test run started failing with ModuleNotFoundError even though
+    the tests themselves pass correctly under the project's own .venv.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ .claude/hooks/stop_verify.py | 10 +++++++++-
+ plans/logs/_auto-capture.md  | 15 +++++++++++++++
+ 2 files changed, 24 insertions(+), 1 deletion(-)
+```
+
+## Commit at 2026-08-02 15:38
+```
+commit b55ae952353cb1c0789fe10e456e1f4b9bfb2a67
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 15:38:56 2026 +0530
+
+    Catalog sync CLI: introspect olist schema into app.catalog_tables/columns
+    
+    python -m app.catalog.sync introspects every table/column in the seeded
+    olist schema (types, nullability via a reconstructed ddl_summary,
+    primary/foreign keys, live row counts, up to 5 distinct sample values
+    per column) and persists it into two new app-schema tables matching
+    PRD.md Â§7, so the future text-to-SQL pipeline (M2+) has a real catalog
+    to validate generated SQL against. Truncate + reinsert per run, connects
+    only as the owner role, no LLM calls or embeddings this slice.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ app/__init__.py                                  |   0
+ app/catalog/__init__.py                          |   0
+ app/catalog/sync.py                              | 221 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/catalog/verify_sync.py                       | 178 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-02-catalog-sync-cli.md | 106 ++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-catalog-sync-cli.md      |  68 +++++++++++++++++++++++++++++++
+ tests/_catalog_helpers.py                        | 127 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_catalog_sync.py                       | 334 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_verify_sync_script.py                 |  59 +++++++++++++++++++++++++++
+ 9 files changed, 1093 insertions(+)
+```
+
+## Commit at 2026-08-02 15:41
+```
+commit e71e2a2058ec62c5c7b6afaf11e27587fb99527d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 15:41:03 2026 +0530
+
+    Capture slice log for Catalog sync CLI
+    
+    Promotes a 2nd-repetition pattern to templates/no-slop.md: prove
+    restricted/failure paths by actually triggering them, not by checking a
+    config/grant/state proxy for them.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ plans/logs/2026-08-02-catalog-sync-cli.md | 87 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ templates/no-slop.md                      |  9 +++++++++
+ 2 files changed, 96 insertions(+)
+```
+
+## Commit at 2026-08-02 15:48
+```
+commit 0536c7dc168c58272c17e3ddc4b40ddfae2eb760
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 15:48:53 2026 +0530
+
+    Handoff: catalog sync CLI done, next brief is LLM table descriptions
+    
+    Flags an open design question for the next slice: sync.py's
+    TRUNCATE+reinsert of catalog_tables will wipe any cached LLM description
+    on re-run, so that slice must resolve it (likely UPSERT on table_name)
+    before implementation, not discover it mid-build.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ HANDOFF.md | 238 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------------------
+ 1 file changed, 138 insertions(+), 100 deletions(-)
+```

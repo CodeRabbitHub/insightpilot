@@ -99,20 +99,54 @@ class CatalogSyncTests(unittest.TestCase):
                 ddl_summary.strip(), f"ddl_summary is blank for {table_name}"
             )
 
-    def test_catalog_tables_description_is_null_for_all_rows(self):
-        # Out-of-scope guard: LLM-generated descriptions are a later slice
-        # per the brief -- no LLM calls should have happened this slice.
+    def test_sync_preserves_an_existing_description_across_a_resync(self):
+        # Superseded by plans/briefs/2026-08-02-llm-table-descriptions.md:
+        # sync must UPSERT, never wipe a cached LLM description (see that
+        # slice's app/catalog/describe.py). This replaces the prior slice's
+        # "description is always NULL" guard, which this slice's brief
+        # deliberately contradicts.
         with self.conn.cursor() as cur:
-            cur.execute(
-                "SELECT table_name FROM app.catalog_tables WHERE description IS NOT NULL"
+            cur.execute("SELECT id, description FROM app.catalog_tables ORDER BY table_name LIMIT 1")
+            table_id, original_description = cur.fetchone()
+
+        try:
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE app.catalog_tables SET description = %s WHERE id = %s",
+                    ("a hand-set description for this test", table_id),
+                )
+            self.conn.commit()
+
+            second_result = run_sync()
+            self.assertEqual(
+                second_result.returncode,
+                0,
+                "python -m app.catalog.sync did not exit 0 on a re-sync:\n"
+                f"stdout={second_result.stdout}\nstderr={second_result.stderr}",
             )
-            rows = cur.fetchall()
-        self.assertEqual(
-            rows,
-            [],
-            "catalog_tables.description should stay NULL this slice, found "
-            f"non-null for: {rows}",
-        )
+
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "SELECT description FROM app.catalog_tables WHERE id = %s", (table_id,)
+                )
+                description = cur.fetchone()[0]
+            self.assertEqual(
+                description,
+                "a hand-set description for this test",
+                "re-running sync must preserve an existing description, not "
+                "reset it to NULL",
+            )
+        finally:
+            # Restore the original value so this test never leaks a
+            # throwaway description into the real DB state -- a
+            # subsequent python -m app.catalog.describe run must still see
+            # this row as needing a real description, not "already done".
+            with self.conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE app.catalog_tables SET description = %s WHERE id = %s",
+                    (original_description, table_id),
+                )
+            self.conn.commit()
 
     def test_catalog_columns_names_match_information_schema_per_table(self):
         with self.conn.cursor() as cur:

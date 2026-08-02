@@ -2,6 +2,10 @@
 Checks on .env.example against the brief's Outputs line: ".env.example --
 all required env vars with placeholder values" and the Constraints line
 "secrets via .env, .env.example committed and kept current".
+
+Extended by plans/briefs/2026-08-02-llm-table-descriptions.md: a new
+`ANTHROPIC_API_KEY` var (plus an env-configurable model-name var) must be
+added alongside the existing connection vars.
 """
 import re
 import unittest
@@ -18,6 +22,7 @@ REQUIRED_VARS = (
     "POSTGRES_PASSWORD",
     "OLIST_RO_USER",
     "OLIST_RO_PASSWORD",
+    "ANTHROPIC_API_KEY",
 )
 
 
@@ -38,6 +43,18 @@ class EnvExampleTests(unittest.TestCase):
             missing,
             [],
             f".env.example is missing (or has empty) values for: {missing}",
+        )
+
+    def test_contains_an_env_configurable_anthropic_model_name_var(self):
+        # The brief requires the model name to be env-configurable (not
+        # hardcoded), without mandating an exact var name, so this matches
+        # any ANTHROPIC_*MODEL* assignment rather than one hardcoded name.
+        text = ENV_EXAMPLE_FILE.read_text(encoding="utf-8")
+        self.assertRegex(
+            text,
+            re.compile(r"^ANTHROPIC[A-Z_]*MODEL[A-Z_]*=.+$", re.MULTILINE),
+            ".env.example has no ANTHROPIC_*MODEL* var for an "
+            "env-configurable model name",
         )
 
 

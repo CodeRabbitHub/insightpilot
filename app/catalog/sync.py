@@ -12,7 +12,7 @@ CREATE SCHEMA IF NOT EXISTS app;
 
 CREATE TABLE IF NOT EXISTS app.catalog_tables (
     id SERIAL PRIMARY KEY,
-    table_name TEXT NOT NULL,
+    table_name TEXT NOT NULL UNIQUE,
     description TEXT,
     row_count BIGINT NOT NULL,
     ddl_summary TEXT NOT NULL
@@ -28,6 +28,20 @@ CREATE TABLE IF NOT EXISTS app.catalog_columns (
     ref_table TEXT,
     sample_values_json JSONB NOT NULL
 );
+
+-- catalog_tables predates this UNIQUE constraint; CREATE TABLE IF NOT
+-- EXISTS above won't retrofit it onto an already-existing table, so add it
+-- idempotently here. Required for the ON CONFLICT (table_name) upsert in
+-- sync() below, which must preserve description across re-syncs.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'catalog_tables_table_name_key'
+    ) THEN
+        ALTER TABLE app.catalog_tables
+            ADD CONSTRAINT catalog_tables_table_name_key UNIQUE (table_name);
+    END IF;
+END $$;
 """
 
 
@@ -157,10 +171,6 @@ def sync():
     try:
         with conn.cursor() as cur:
             cur.execute(SCHEMA_DDL)
-            cur.execute(
-                "TRUNCATE app.catalog_columns, app.catalog_tables "
-                "RESTART IDENTITY CASCADE;"
-            )
 
             pk_by_table = primary_key_columns_by_table(cur)
             fk_by_column = foreign_keys_by_column(cur)
@@ -171,13 +181,24 @@ def sync():
                 row_count = olist_row_count(cur, table_name)
                 ddl_summary = build_ddl_summary(table_name, columns, pk_columns)
 
+                # ON CONFLICT never touches description, so an
+                # LLM-generated description (app/catalog/describe.py)
+                # survives a re-sync instead of being wiped.
                 cur.execute(
                     "INSERT INTO app.catalog_tables "
-                    "(table_name, description, row_count, ddl_summary) "
-                    "VALUES (%s, NULL, %s, %s) RETURNING id",
+                    "(table_name, row_count, ddl_summary) "
+                    "VALUES (%s, %s, %s) "
+                    "ON CONFLICT (table_name) DO UPDATE SET "
+                    "row_count = EXCLUDED.row_count, "
+                    "ddl_summary = EXCLUDED.ddl_summary "
+                    "RETURNING id",
                     (table_name, row_count, ddl_summary),
                 )
                 table_id = cur.fetchone()[0]
+                cur.execute(
+                    "DELETE FROM app.catalog_columns WHERE table_id = %s",
+                    (table_id,),
+                )
 
                 for column_name, data_type, _is_nullable in columns:
                     is_pk = column_name in pk_columns
