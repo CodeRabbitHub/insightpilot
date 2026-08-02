@@ -32,6 +32,11 @@ NEWLY_APPROVED_PACKAGES = {"anthropic", "pydantic"}
 # defense-in-depth wording names it), added by a later slice than the one
 # this test file's docstring describes.
 NEWLY_APPROVED_PACKAGES |= {"sqlglot"}
+# Extended by plans/briefs/2026-08-02-execute-sql.md: asyncpg is a third,
+# separately pre-approved dependency (ARCHITECT.md's own "separate asyncpg
+# pool with a SELECT-only user" wording names it), added by a later slice
+# than the one this test file's docstring describes.
+NEWLY_APPROVED_PACKAGES |= {"asyncpg"}
 
 
 def _package_names(text):
