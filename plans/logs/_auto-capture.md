@@ -297,3 +297,26 @@ Date:   Sun Aug 2 16:49:10 2026 +0530
  tests/test_verify_describe_script.py                   | 113 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  15 files changed, 1153 insertions(+), 19 deletions(-)
 ```
+
+## Commit at 2026-08-02 17:21
+```
+commit ddfc51a059c6c2e17cb24a8fe5741613137a9339
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 17:21:40 2026 +0530
+
+    Capture + handoff: LLM table descriptions slice
+    
+    Finishes the record for commit a657fd6: the slice log, eval, and
+    HANDOFF.md rewrite were produced last session but never committed. No
+    code changes -- evidence only, committed separately from the generate-sql
+    slice to keep one-slice-per-commit intact.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ HANDOFF.md                                      | 290 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------
+ evals/table_description.md                      |  48 ++++++++++++++++++++++++++
+ plans/logs/2026-08-02-llm-table-descriptions.md |  84 +++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                     |  35 +++++++++++++++++++
+ 4 files changed, 319 insertions(+), 138 deletions(-)
+```
