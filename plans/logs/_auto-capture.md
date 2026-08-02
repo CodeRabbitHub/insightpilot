@@ -361,3 +361,72 @@ Date:   Sun Aug 2 17:36:45 2026 +0530
  tests/test_verify_generate_sql_script.py     | 190 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  12 files changed, 1017 insertions(+)
 ```
+
+## Commit at 2026-08-02 17:48
+```
+commit 32065a63554c62ab93663b2677cf0e68e2209273
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 17:48:18 2026 +0530
+
+    Capture + handoff: generate-sql slice done, next brief is sqlglot validation
+    
+    Slice log for the generate-sql-from-a-fixed-question slice (commit
+    e63962a), no-slop.md gains a checklist line requiring a matching eval for
+    any new/changed prompt file (caught once this slice, promoted by explicit
+    choice), and HANDOFF.md is rewritten with this session's verified state
+    plus the next brief: a sqlglot-based validator replacing
+    verify_generate_sql.py's regex tokenizer, per ARCHITECT.md's
+    defense-in-depth ordering.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ HANDOFF.md                            | 296 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------------------
+ plans/logs/2026-08-02-generate-sql.md |  87 ++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md           |  41 +++++++++++++++++++++++
+ templates/no-slop.md                  |   4 +++
+ 4 files changed, 282 insertions(+), 146 deletions(-)
+```
+
+## Commit at 2026-08-02 19:29
+```
+commit cf0b452793b47acaeec459a72db235ff21a1ab91
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 19:29:21 2026 +0530
+
+    sqlglot SQL validator: replace the regex reference-checker with real parsing
+    
+    Adds app/pipeline/validate_sql.py (validate_sql(sql, cur)): parses with
+    sqlglot's Postgres dialect, rejects anything but a single SELECT, and
+    checks every table/column reference against the live catalog -- table
+    existence via an AST walk, column resolution via sqlglot's own
+    scope-aware qualify(), which also correctly handles cases the old regex
+    tokenizer couldn't (per-table ambiguity, ORDER BY output-alias
+    references). verify_generate_sql.py now calls it instead of the deleted
+    check_references/fetch_valid_names/regex constants.
+    
+    Four review passes on check_table_references each found one more way a
+    cross-schema or cross-catalog reference could slip past a basename-only
+    check (pg_catalog.products, a CTE name masking a qualified reference, a
+    catalog..table double-dot form, and a case-folding mismatch) -- fixed by
+    converging on an allowlist that combines every qualifier field sqlglot
+    exposes and requires it equal exactly "olist" when present. Each fix has
+    a regression test in ValidateSqlTests.
+    
+    Also extends test_llm_description_setup.py's dependency allowlist to
+    include sqlglot (a second, separately pre-approved dependency per
+    ARCHITECT.md), per explicit user decision on how to handle the resulting
+    stale-test conflict.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ app/pipeline/validate_sql.py                 | 108 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/pipeline/verify_generate_sql.py          |  95 ++-------------------------------------------
+ artifacts/reviews/2026-08-02-validate-sql.md | 126 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-validate-sql.md      |  78 +++++++++++++++++++++++++++++++++++++
+ requirements.txt                             |   1 +
+ tests/test_llm_description_setup.py          |   5 +++
+ tests/test_verify_generate_sql_script.py     | 328 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------
+ 7 files changed, 551 insertions(+), 190 deletions(-)
+```

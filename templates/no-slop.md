@@ -51,6 +51,15 @@ Dead code is a lie about what the program does. Delete it.
       test forcing the missing-var path; 2026-08-02 catalog-sync-cli's RO
       test checked `has_schema_privilege()` instead of actually running the
       CLI as the restricted role)
+- [ ] For identifier/security validation logic (parsing, allowed
+      schemas/tables/paths), the check is an allowlist (must exactly
+      match the known-good shape), not a blocklist (reject specific
+      known-bad patterns) — enumerate every field a value can carry (e.g.
+      via the library's own type introspection) before trusting a
+      single-field check (caught 4x in one function: 2026-08-02
+      validate-sql's check_table_references missed a cross-schema, a
+      CTE-masked, a cross-catalog, and a case-folding bypass in
+      succession before converging on an allowlist)
 
 ## 6. Comments
 

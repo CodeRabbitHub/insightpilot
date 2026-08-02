@@ -1,64 +1,58 @@
 # Handoff
 
 Date: 2026-08-02
-Slice just completed: plans/briefs/2026-08-02-generate-sql.md +
-  plans/logs/2026-08-02-generate-sql.md (commit e63962a)
+Slice just completed: plans/briefs/2026-08-02-validate-sql.md +
+  plans/logs/2026-08-02-validate-sql.md (commit cf0b452)
 
 ## State of the work
-- M2 Pipeline v0 now has its first link: question → SQL. No retrieval,
-  no validation-by-parser, no execution yet — those are separate slices,
-  per PLAN.md.
-- `prompts/generate_sql.md` — new versioned prompt (`string.Template`,
-  `$schema_context`/`$question` placeholders). Instructs the model to
-  return exactly one `SELECT`, schema-qualified as `olist.<table>`, never
-  inventing a table/column, as `{"sql": "..."}"`.
-- `app/pipeline/generate_sql.py` — new package/module, CLI via
-  `python -m app.pipeline.generate_sql`. `FIXED_QUESTION = "What are the
-  top 5 product categories by number of orders?"`. `build_schema_context`
-  covers all 9 `olist` tables (reuses `app.catalog.describe`'s
-  `fetch_tables`/`fetch_columns`/`format_columns_context` rather than
-  duplicating them — raises `RuntimeError` if any table's `description`
-  is still `NULL`, so a partially-described catalog fails loudly instead
-  of silently embedding "Description: None" into the prompt).
-  `GenerateSqlResponse` (Pydantic) requires a single `SELECT` statement —
-  rejects non-SELECT and rejects any remaining `;` after stripping one
-  trailing semicolon, so a smuggled second statement fails validation.
-  `call_llm_for_sql` retries once, wrapping the whole attempt (API call +
-  JSON extraction + Pydantic validation), matching `describe.py`'s
-  pattern exactly. `generate_sql()` returns the SQL string (doesn't
-  print); `main()` prints it.
-- `app/pipeline/verify_generate_sql.py` — the done-check. Confirms the
-  SQL starts with `SELECT` and, via a hand-rolled alias-aware regex
-  tokenizer (`check_references` — strips string literals, resolves table
-  aliases from `FROM/JOIN olist.<table> <alias>` and output aliases from
-  `AS <alias>`, then checks every remaining `olist.<table>` /
-  `<alias>.<column>` / bare identifier against a live query against
-  `app.catalog_tables`/`app.catalog_columns`), that every table/column it
-  references is real. Explicitly not sqlglot (out of scope this slice);
-  documented limitation: a bare subquery alias with no `AS` and no
-  `olist.` prefix right before it would false-positive as unknown.
-- `evals/generate_sql.md` — second LLM prompt in the project, needed its
-  own eval per CLAUDE.md. 1 fixed case (the one hardcoded question)
-  against a 4-point rubric, graded by executing the generated SQL
-  directly against the real DB (a one-off manual check, not a pipeline
-  capability) and confirming a correctly-ordered, sane 5-row result.
-- `templates/no-slop.md` gained a new checklist line under Scope: a new/
-  changed `prompts/*.md` file must have a matching `evals/*.md` case —
-  this slice's Gate 2 caught that gap once (not yet a "caught twice"
-  case, promoted anyway by explicit user choice).
-- Separately committed (`ddfc51a`, before this slice's commit): the
-  *previous* slice's `/capture`+`/handoff` output (`evals/
-  table_description.md`, its slice log, the `HANDOFF.md` rewrite) had
-  been produced last session but never actually committed — found
-  sitting uncommitted at the start of this session and closed out on its
-  own, so slice/commit boundaries stayed one-to-one.
-- 85 tests pass (`python -m unittest discover tests`, via the project
-  `.venv`) — 60 from prior slices + 25 new: prompt-file structural
-  checks, module-constants/Pydantic-validator unit tests (no network),
-  real end-to-end `generate_sql()`/CLI runs, and direct unit tests of
-  `check_references` against hand-built SQL strings (valid aliased
-  queries, a hallucinated table, a hallucinated column, keywords/
-  aggregates, string-literal look-alikes).
+- M2 Pipeline v0 now has its second link fully proven: question → SQL →
+  **validate** (real sqlglot parsing, not regex). Still no execution.
+- `app/pipeline/validate_sql.py` — new module exporting `validate_sql(sql,
+  cur)`. Parses with sqlglot's Postgres dialect (`parse_single_select`):
+  rejects a parse failure, more than one statement (after filtering the
+  `None` artifact from a trailing semicolon), or anything that isn't an
+  `exp.Select`. `check_table_references` walks every `exp.Table` node and
+  requires its combined qualifier (`table.catalog` + `table.db` — the
+  only two naming-qualifier fields `exp.Table` exposes, confirmed via
+  `arg_types`) to equal exactly `"olist"` if present at all, and the
+  basename to be a real table in `app.catalog_tables` (case-insensitive,
+  CTE names exempted only when truly unqualified). `check_column_references`
+  delegates to `sqlglot.optimizer.qualify.qualify(...,
+  validate_qualify_columns=True)` for real scope-aware column resolution
+  (correctly handles per-table ambiguity and `ORDER BY <output_alias>`,
+  which the old regex tokenizer couldn't). `fetch_catalog_schema(cur)`
+  builds `{table_name: {column_name: data_type}}` live from
+  `app.catalog_tables`/`app.catalog_columns` — never hardcoded.
+- `app/pipeline/verify_generate_sql.py` — now calls `validate_sql(sql,
+  cur)` instead of the deleted `check_references`/`fetch_valid_names`/
+  `SQL_STOPWORDS`/regex constants; shrank from 125 to 34 lines. Same
+  PASSED/FAILED/exit-code contract as before.
+- `requirements.txt` gained `sqlglot==30.14.0` (ARCHITECT.md's own
+  defense-in-depth wording pre-approved it).
+- Four successive no-slop-reviewer passes on `check_table_references`
+  each found one more real validation bypass before the design converged
+  on an allowlist (qualifier must equal exactly `"olist"`, combining every
+  qualifier field the library exposes) rather than a blocklist (reject
+  specific known-bad values): a bare cross-schema reference
+  (`pg_catalog.products`), a CTE name masking a qualified reference to
+  itself, a `catalog..table` double-dot form that bypassed a `.db`-only
+  check, and (non-bypass, fail-closed) a table-valued-function call
+  producing an uninformative message plus a case-folding mismatch
+  wrongly rejecting valid uppercase references. Every fix has its own
+  regression test in `ValidateSqlTests`. Full history in the gate record.
+- `templates/no-slop.md` gained a new line under Untested edges: for
+  identifier/security validation logic, prefer an allowlist over a
+  blocklist and enumerate every field a value can carry — promoted after
+  this exact bug shape recurred four times in one function this slice.
+- A pre-existing, unrelated test
+  (`test_llm_description_setup.py::test_requirements_gains_no_other_new_dependencies`)
+  hardcoded a dependency allow-list from an earlier slice and broke when
+  `sqlglot` was added; per explicit user decision, its allow-list was
+  extended (not weakened) with a comment explaining why.
+- 91 tests pass (`python -m unittest discover tests`, via the project
+  `.venv`) — 86 from prior slices (minus 6 deleted `CheckReferencesTests`,
+  plus net-new coverage) + `ValidateSqlTests`' 11 cases covering the
+  positive fixed-question SQL and every bug found above.
 
 ## Proof
 ```
@@ -69,114 +63,103 @@ SELECT p.product_category_name, COUNT(DISTINCT oi.order_id) AS num_orders FROM o
 verify_generate_sql: PASSED
 
 $ python -m unittest discover tests
-.....................................................................................
+...........................................................................................
 ----------------------------------------------------------------------
-Ran 85 tests in 53.988s
+Ran 91 tests in 55.546s
 
 OK
 ```
-Executed directly against the real DB (one-off, outside the pipeline) to
-confirm the SQL is actually correct, not just syntactically valid:
-```
-('cama_mesa_banho', 9417)
-('beleza_saude', 8836)
-('esporte_lazer', 7720)
-('informatica_acessorios', 6689)
-('moveis_decoracao', 6449)
-```
 
 ## Open questions / known issues
-- Test runner: still `unittest`, still via the project `.venv`. Carried
-  over: will likely move to pytest once FastAPI test deps land in M4 —
-  that slice must update `.claude/hooks/stop_verify.py`'s TEST_CMD and
-  CLAUDE.md together.
+- Test runner: still `unittest`, still via the project `.venv`. The next
+  slice adds `asyncpg`, which is inherently async — plain `unittest`
+  supports this natively via `unittest.IsolatedAsyncioTestCase` (stdlib,
+  no new test dependency needed), so this doesn't force the long-carried
+  "move to pytest" decision yet; flag if that changes.
 - Lint/type tooling (`ruff`, `mypy`) named in CLAUDE.md's Commands still
-  aren't installed in the project `.venv` — carried over, not blocking
-  yet.
-- `verify_generate_sql.py`'s `check_references` is a hand-rolled regex
-  tokenizer, not a real parser — documented gaps: doesn't verify an alias
-  actually resolves to the table it was assigned to, validates bare
-  column tokens against the full cross-table column set rather than
-  per-table, and would false-positive on a bare subquery alias. All
-  explicitly deferred to the sqlglot slice (next, below) per ARCHITECT.md's
-  "defense in depth" ordering (sqlglot parse gate → catalog check →
-  LIMIT/timeout injection → RO grants as last line of defense).
-- `generate_sql()` has no "already done" cache like `describe.py` — every
-  call is a real, billed Claude API call. Tests share one call per test
-  class (`setUpClass`) to avoid re-billing per assertion; still costs
-  real API calls across the eval + gate + this handoff's proof runs.
+  aren't installed in the project `.venv` — carried over, not blocking.
+- `fetch_catalog_schema(cur)` issues two fresh queries against the
+  catalog on every single `validate_sql()` call, no caching — fine at
+  current CLI scale (one call per run), revisit only if this becomes a
+  real latency concern once M4's API wraps this pipeline.
+- `validate_sql` checks that every referenced identifier *exists*; it
+  does not check semantic correctness (e.g. a join that's technically
+  valid SQL but wrong business logic) — that's the LLM's job and the
+  eval's job, not this validation layer's, per ARCHITECT.md's layering.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-Add a `sqlglot`-based SQL validator — a new `validate_sql(sql, cur)`
-function that enforces exactly one `SELECT` statement and confirms every
-table/column it references resolves against `app.catalog_tables`/
-`app.catalog_columns` — and use it to replace `verify_generate_sql.py`'s
-hand-rolled regex tokenizer, closing the gap that slice explicitly
-deferred. This is ARCHITECT.md's "defense in depth" layers 1+2 (sqlglot
-parse gate, then catalog existence check) for the one fixed question's
-generated SQL. Still no execution against any database.
+Execute the validated SQL for real against a new read-only `asyncpg`
+connection (using the already-provisioned `OLIST_RO_USER`/
+`OLIST_RO_PASSWORD`), with a hard `LIMIT 1000` cap and a 10s
+`statement_timeout` injected first — ARCHITECT.md's defense-in-depth
+layer 3 — and print the fixed question's actual result rows. This
+completes M2 Pipeline v0's full chain (question → SQL → validate →
+execute → printed answer) for the one fixed question.
 
 Constraints:
-New dependency, pre-approved by ARCHITECT.md's own wording ("Defense in
-depth for generated SQL, in order: sqlglot parse gate ... → catalog
-existence check") but still needs adding to `requirements.txt` and
-confirming at Gate 1: `sqlglot` only, no other new dependencies. Parse
-with sqlglot's Postgres dialect; reject (raise, no silent pass) if:
-parsing fails outright, more than one statement is present, the
-statement isn't a `SELECT`, or any table/column identifier it references
-resolves to neither `app.catalog_tables.table_name` nor
-`app.catalog_columns.column_name` (schema-qualified `olist.<table>` and
-bare/alias-qualified columns both in scope — use sqlglot's own AST
-walk/scope resolution for this, not new regex). Plain psycopg2 for the
-catalog lookup (reuse `app.catalog.sync.connect`), no ORM. No LIMIT/
-statement_timeout injection (ARCHITECT.md's layer 3, a later slice), no
-execution, no changes to `generate_sql.py`'s prompt or LLM-calling logic
-— this slice is purely the validation layer consuming `generate_sql`'s
-existing output. `verify_generate_sql.py` keeps its role as the
-done-check CLI but calls the new validator instead of `check_references`
-(delete `check_references` and its now-redundant tests once the
-replacement is proven equivalent-or-better).
+New dependency, pre-approved by ARCHITECT.md's own wording ("a separate
+asyncpg pool with a SELECT-only user exclusively for generated SQL") —
+`asyncpg` only, pinned in `requirements.txt` to whatever version `pip
+install` resolves, confirmed at Gate 1. The asyncpg connection MUST use
+`OLIST_RO_USER`/`OLIST_RO_PASSWORD` (never `POSTGRES_USER`/
+`POSTGRES_PASSWORD`) — blast-radius isolation via the read-only grant is
+the product's core safety property (ARCHITECT.md), reusing
+`POSTGRES_HOST`/`POSTGRES_PORT`/`POSTGRES_DB` for the rest of the
+connection params. Before executing, inject a `LIMIT 1000` cap — only if
+the SQL has no `LIMIT` or a looser one than 1000, never loosen an
+existing tighter `LIMIT` (the fixed question's `LIMIT 5` must survive
+untouched) — reusing sqlglot (already a dependency) to modify the parsed
+statement rather than string-munging SQL text. Set `statement_timeout`
+to 10s scoped to just this query (e.g. `SET LOCAL statement_timeout` inside
+an explicit transaction), not a global/session-wide setting. A full
+persistent connection pool (`asyncpg.create_pool` reused across many
+requests) is the eventual FastAPI shape (M4) — for this CLI-only slice, a
+single connection opened and closed per run is sufficient; don't build
+pool lifecycle management prematurely. Still only the one
+`FIXED_QUESTION` from `generate_sql.py` — no arbitrary/multi-question
+support. No chart or natural-language explanation step (`analyze.md`,
+later milestone) — "printed answer" means the raw result rows.
 
 Inputs:
-ARCHITECT.md's defense-in-depth ordering and DB-pool-isolation decisions;
-`plans/logs/2026-08-02-generate-sql.md`'s "next smallest slice" note;
-`app/pipeline/generate_sql.py`'s real output for the fixed question (the
-positive case); `app/pipeline/verify_generate_sql.py`'s existing
-`check_references` test cases (the hallucinated-table/hallucinated-
-column/keyword/alias scenarios) as the negative/edge cases the sqlglot
-version must still handle correctly, now via real parsing instead of
-regex; `app.catalog_tables`/`app.catalog_columns` as the live existence
-source (never hardcoded).
+ARCHITECT.md's defense-in-depth layer 3 (LIMIT 1000 + statement_timeout
+10s) and two-pool/blast-radius-isolation decision; PLAN.md's M2
+definition; `app/pipeline/generate_sql.py`'s `generate_sql()` and
+`app/pipeline/validate_sql.py`'s `validate_sql(sql, cur)` as the two
+already-built upstream steps; `.env.example`'s `OLIST_RO_USER`/
+`OLIST_RO_PASSWORD` (provisioned by M1's seed, already granted
+SELECT-only per `tests/test_olist_ro_permissions.py`); this session's
+proof output (5 rows, strictly descending) as the sanity-check reference
+for the new done-check.
 
 Outputs:
-- `requirements.txt` gains `sqlglot` (pinned to whatever version `pip
-  install` resolves).
+- `requirements.txt` gains `asyncpg` (pinned).
 - A new module (exact path proposed at Gate 1, e.g.
-  `app/pipeline/validate_sql.py`) exporting `validate_sql(sql, cur)` —
-  raises a clear, specific exception (naming what's wrong: multi-
-  statement, non-SELECT, or which identifier is unknown) on any
-  violation, returns normally (no return value needed) if valid.
-- `app/pipeline/verify_generate_sql.py` updated to call `validate_sql`
-  instead of `check_references`; `check_references` and its dedicated
-  unit tests removed once the new validator's own tests cover the same
-  scenarios.
-- Unit tests for `validate_sql` covering: the real fixed-question SQL
-  (passes), a multi-statement string, a non-SELECT statement, a
-  hallucinated table name, and a hallucinated column name (all four
-  rejected, each with a message naming what's wrong).
+  `app/pipeline/execute_sql.py`) exporting an async `execute_sql(sql)` (or
+  similar): opens an `OLIST_RO_USER` asyncpg connection, injects the
+  LIMIT cap via sqlglot, sets the scoped statement_timeout, executes,
+  returns the result rows, closes the connection.
+- A new end-to-end runner + done-check (exact names proposed at Gate 1,
+  e.g. `app/pipeline/answer.py` + `app/pipeline/verify_answer.py`)
+  chaining `generate_sql()` → `validate_sql()` → `execute_sql()` and
+  printing the fixed question's real answer rows.
+- Tests: the LIMIT-injection logic's three cases (no `LIMIT` → 1000
+  added; looser `LIMIT` → capped to 1000; tighter `LIMIT` → left
+  untouched) tested directly against the pure sqlglot-modification logic;
+  a real end-to-end test that runs the new CLI and confirms actual rows
+  come back through the `OLIST_RO_USER` role (proving the read-only path
+  is real, not asserted).
 
 Done-check:
-`python -m app.pipeline.verify_generate_sql` still exits 0 for the fixed
-question (now backed by real sqlglot validation, not regex) — paste its
-output. Separately, a test run demonstrates `validate_sql` rejects each
-of the four deliberately-invalid SQL strings above, each raising with a
-message identifying the specific problem.
+`python -m app.pipeline.verify_answer` (or whatever name Gate 1 confirms)
+exits 0 and prints the fixed question's real result rows, executed via
+the read-only asyncpg connection — paste its output. Separately, a test
+run demonstrates all three LIMIT-injection cases behave as specified
+above.
 
 Out-of-scope:
-LIMIT/statement_timeout injection, executing the generated SQL against
-any database (the read-only asyncpg pool doesn't exist yet), the
-business glossary (F5/M3), retrieval/pgvector (M3), the `analyze.md`
-chart/explanation step, the repair loop, FastAPI, frontend, CI, changing
-`generate_sql.py`'s prompt or LLM-calling behavior, arbitrary/multi-
-question CLI support.
+The `analyze.md` chart/explanation step, the repair loop, the business
+glossary (F5/M3), retrieval/pgvector (M3), FastAPI/frontend (M4/M5), CI,
+persistent connection pooling reused across multiple requests, arbitrary/
+multi-question CLI support, changing `generate_sql.py`'s or
+`validate_sql.py`'s existing behavior.
