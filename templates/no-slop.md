@@ -69,6 +69,10 @@ Dead code is a lie about what the program does. Delete it.
 - [ ] Everything here is in the brief
 - [ ] Anything extra is flagged explicitly, not smuggled in
 - [ ] Nothing in the brief was silently dropped
+- [ ] A new or changed `prompts/*.md` file has a matching `evals/*.md`
+      case (or an explicit note why not) — CLAUDE.md: "a prompt change
+      without an eval run is not done" (caught 2026-08-02 generate-sql:
+      the new prompt shipped with no eval until this check named it)
 
 ## 9. Fake done
 

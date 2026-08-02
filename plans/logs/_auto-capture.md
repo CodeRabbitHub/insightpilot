@@ -320,3 +320,44 @@ Date:   Sun Aug 2 17:21:40 2026 +0530
  plans/logs/_auto-capture.md                     |  35 +++++++++++++++++++
  4 files changed, 319 insertions(+), 138 deletions(-)
 ```
+
+## Commit at 2026-08-02 17:36
+```
+commit e63962a73c9a7f13017a95f34fc72ed2f2dd1ab1
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 17:36:45 2026 +0530
+
+    Generate SQL from a fixed question: first link of M2's text-to-SQL pipeline
+    
+    For one hardcoded business question, app/pipeline/generate_sql.py builds
+    the full olist catalog (all 9 tables' DDL + LLM description + columns) as
+    schema context, calls Claude once via prompts/generate_sql.md, validates
+    the {"sql": "..."} reply through a Pydantic model that only accepts a
+    single SELECT statement (one retry, matching describe.py's pattern), and
+    returns the raw SQL. verify_generate_sql.py is the done-check: confirms
+    the SQL starts with SELECT and, via a hand-rolled alias-aware tokenizer
+    (no sqlglot yet), that every table/column it references is real per a
+    live catalog query.
+    
+    Reuses describe.py's fetch_tables/fetch_columns/format_columns_context/
+    extract_json_object rather than duplicating them. Verified end-to-end:
+    the generated SQL, executed directly against the real DB, returns 5
+    correctly-ordered categories (see evals/generate_sql.md).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ app/pipeline/__init__.py                     |   0
+ app/pipeline/generate_sql.py                 | 108 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/pipeline/verify_generate_sql.py          | 125 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-02-generate-sql.md | 138 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ evals/generate_sql.md                        |  59 +++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-generate-sql.md      |  75 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                  |  23 +++++++++++++++++++
+ prompts/generate_sql.md                      |  29 ++++++++++++++++++++++++
+ tests/_generate_sql_helpers.py               |  29 ++++++++++++++++++++++++
+ tests/test_generate_sql_cli.py               | 148 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_generate_sql_prompt_file.py       |  93 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_verify_generate_sql_script.py     | 190 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 12 files changed, 1017 insertions(+)
+```
