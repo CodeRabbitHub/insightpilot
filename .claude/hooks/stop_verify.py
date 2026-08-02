@@ -10,7 +10,15 @@ import pathlib
 import subprocess
 import sys
 
-TEST_CMD = [sys.executable, "-m", "unittest", "discover", "tests"]
+# sys.executable is whatever interpreter launched this hook, which may be
+# an isolated harness venv with none of the project's dependencies
+# installed -- prefer the project's own .venv when one exists.
+_VENV_PYTHON = pathlib.Path(".venv/Scripts/python.exe")
+if not _VENV_PYTHON.exists():
+    _VENV_PYTHON = pathlib.Path(".venv/bin/python")
+PYTHON = str(_VENV_PYTHON) if _VENV_PYTHON.exists() else sys.executable
+
+TEST_CMD = [PYTHON, "-m", "unittest", "discover", "tests"]
 MAX_ATTEMPTS = 3
 
 ATTEMPTS = pathlib.Path(".claude/.stop_attempts")
