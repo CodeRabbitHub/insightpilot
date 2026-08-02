@@ -1,126 +1,164 @@
 # Handoff
 
 Date: 2026-08-02
-Slice just completed: plans/briefs/2026-08-02-foundation-db-seed.md +
-  plans/logs/2026-08-02-foundation-db-seed.md (commit 4e1745b)
+Slice just completed: plans/briefs/2026-08-02-catalog-sync-cli.md +
+  plans/logs/2026-08-02-catalog-sync-cli.md (commit b55ae95, capture e71e2a2)
 
 ## State of the work
-- Repo git-initialized (main branch); Phase 0 scaffold committed
-  (95a20c2), Foundation DB + seed slice committed (4e1745b).
-- `docker-compose.yml` brings up a single `db` service
-  (`pgvector/pgvector:pg16`), env-driven credentials, persistent volume,
-  healthcheck.
-- `scripts/seed.py` idempotently loads the 9 Olist CSVs (already present
-  in `data/`, gitignored) into typed tables under an `olist` schema, and
-  provisions a SELECT-only `olist_ro` role (verified via live `psql`:
-  can SELECT, denied INSERT/UPDATE/DELETE/CREATE).
-- `scripts/verify_seed.py` is the working done-check: row counts
-  (CSV-parsed via `csv.reader`, not raw line count — `order_reviews` has
-  embedded newlines in `review_comment_message`), `vector` extension
-  installed, `olist_ro` permission enforcement.
-- 28 tests pass (`python -m unittest discover tests`), covering schema,
-  RO permissions (behavioral + grant-level), seed idempotency, the
-  verify script itself, docker-compose structure, `.env.example`, and
-  `data/README.md`.
-- `requirements.txt` (new): `psycopg2-binary==2.9.12`,
-  `python-dotenv==1.2.2` — first Python deps in the repo.
-- Local `.env` created (gitignored) from `.env.example`; local Postgres
-  runs on host port 5433 (5432 was occupied by an unrelated container on
-  this machine) — `.env.example` itself still documents the sane default
-  of 5432.
-- Gate 2 accepted: artifacts/reviews/2026-08-02-foundation-db-seed.md.
+- Repo git-initialized (main branch); Phase 0 scaffold (95a20c2),
+  Foundation DB + seed (4e1745b), stop_verify venv fix (dbc77f1), Catalog
+  sync CLI (b55ae95) all committed.
+- `app/__init__.py` and `app/catalog/__init__.py` exist — first code under
+  the `app/` package (the future FastAPI backend lands here from M4 on).
+- `app/catalog/sync.py` — CLI (`python -m app.catalog.sync`): connects as
+  `POSTGRES_USER` (never `OLIST_RO_USER`), creates `app` schema +
+  `catalog_tables(id, table_name, description, row_count, ddl_summary)` /
+  `catalog_columns(id, table_id, column_name, data_type, is_pk, is_fk,
+  ref_table, sample_values_json)` if absent, then on every run TRUNCATEs
+  and reinserts both tables from a live introspection of `olist` via
+  `information_schema`/`pg_catalog` (no hardcoded table list). Per table:
+  real row count, a reconstructed CREATE-TABLE-style `ddl_summary` (the
+  only place nullability is recorded), real PK/FK flags, and up to 5
+  distinct ascending non-null sample values per column. `description` is
+  always NULL — no LLM calls this slice.
+- `app/catalog/verify_sync.py` is the working done-check: table-row
+  counts, per-table `ddl_summary` non-empty, per-table column-name sets,
+  PK/FK correctness (both directions), sample-value correctness — all
+  checked against a live `information_schema` introspection, never a
+  hardcoded expectation.
+- 42 tests pass (`python -m unittest discover tests`, via the project
+  `.venv`) — 28 from the foundation slice + 14 new: table/column/PK/FK/
+  sample-value correctness, idempotency (2 runs, stable counts), and a
+  **behavioral** proof that running sync under `OLIST_RO_USER` credentials
+  fails with `InsufficientPrivilege` (not just a privilege-table check).
+- No new dependencies this slice (`requirements.txt` unchanged:
+  `psycopg2-binary`, `python-dotenv`).
+- `templates/no-slop.md` gained a new "Untested edges" line: claimed
+  restrictions/failure paths must be proven by actually triggering them,
+  not by checking a config/grant/state proxy — promoted after the 2nd
+  occurrence (foundation slice's untested KeyError fix; this slice's
+  original `has_schema_privilege`-only RO test).
+- Gate 2 accepted: artifacts/reviews/2026-08-02-catalog-sync-cli.md.
 
 ## Proof
 ```
-$ python scripts/verify_seed.py
-Row counts:
-  [OK] olist.customers: 99441 rows (expected 99441)
-  [OK] olist.geolocation: 1000163 rows (expected 1000163)
-  [OK] olist.order_items: 112650 rows (expected 112650)
-  [OK] olist.order_payments: 103886 rows (expected 103886)
-  [OK] olist.order_reviews: 99224 rows (expected 99224)
-  [OK] olist.orders: 99441 rows (expected 99441)
-  [OK] olist.products: 32951 rows (expected 32951)
-  [OK] olist.sellers: 3095 rows (expected 3095)
-  [OK] olist.product_category_name_translation: 71 rows (expected 71)
-Extensions:
-  [OK] vector extension installed
-Permissions:
-  [OK] olist_ro denied INSERT (permissions enforced)
+$ python -m app.catalog.sync
+  olist.customers: 5 columns, 99441 rows
+  olist.geolocation: 5 columns, 1000163 rows
+  olist.order_items: 7 columns, 112650 rows
+  olist.order_payments: 5 columns, 103886 rows
+  olist.order_reviews: 7 columns, 99224 rows
+  olist.orders: 8 columns, 99441 rows
+  olist.product_category_name_translation: 2 columns, 71 rows
+  olist.products: 9 columns, 32951 rows
+  olist.sellers: 4 columns, 3095 rows
+Catalog sync complete.
 
-verify_seed: PASSED
+$ python -m app.catalog.verify_sync
+Table rows:
+  [OK] app.catalog_tables: 9 rows (expected 9)
+  [OK] olist.customers: row_count=99441 (expected 99441), ddl_summary=set
+  ... (all 9 OK)
+Columns:
+  [OK] ... (all 9 OK)
+Primary keys:
+  [OK] primary keys match live introspection
+Foreign keys:
+  [OK] foreign keys match live introspection
+Sample values:
+  [OK] sample values match live introspection
+
+verify_sync: PASSED
 ```
-Full suite: `Ran 28 tests ... OK`.
+Full suite: `Ran 42 tests ... OK`.
 
 ## Open questions / known issues
-- Test runner: kit hook runs `unittest`; project will likely move to
+- Test runner: still `unittest`, still run via the project `.venv`
+  (`.claude/hooks/stop_verify.py` was fixed in dbc77f1 to use it instead
+  of the harness's own venv). Carried over: project will likely move to
   pytest once FastAPI test deps land in M4 — that slice must update
-  `.claude/hooks/stop_verify.py` TEST_CMD and CLAUDE.md together (carried
-  over from Phase 0, still unresolved).
-- No FK constraints were added between `olist.*` tables (e.g.
-  `order_items.order_id` → `orders.order_id`) — deliberately kept simple
-  since the brief's done-check didn't require referential integrity and
-  it would complicate drop/recreate ordering. Revisit if the SQL pipeline
-  (M2+) needs the planner to see explicit FK relationships.
-- Host Postgres port is machine-specific (5433 here, another container
-  already held 5432) — a fresh clone on a different machine may need no
-  change at all (5432 will likely be free), `.env.example` still defaults
-  to 5432 correctly.
+  `stop_verify.py` TEST_CMD and CLAUDE.md together.
+- **`sync.py`'s TRUNCATE will wipe cached LLM descriptions on a re-run.**
+  The next slice adds `catalog_tables.description` via one LLM call per
+  table, "run once, cached" per PRD F4 — but `sync.py` currently
+  TRUNCATEs + reinserts `catalog_tables` from scratch (`description`
+  always NULL) on every single run, with no awareness that a description
+  might already exist. If `python -m app.catalog.sync` is ever re-run
+  after descriptions are generated, they're gone. The next slice's plan
+  must explicitly decide how to resolve this (e.g. change `sync.py` to
+  UPSERT on `table_name` and preserve existing `description` values
+  instead of truncating) — flagged here so it isn't discovered by
+  surprise mid-implementation.
+- No FK constraints exist between `olist.*` tables (carried over,
+  unchanged) — `catalog_columns.is_fk` is `false` for every column today;
+  this is correct given the live schema, not a bug in the sync.
+- Lint/type tooling (`ruff`, `mypy`) named in CLAUDE.md's Commands aren't
+  installed in the project `.venv` yet (`requirements.txt` only has
+  `psycopg2-binary`, `python-dotenv`) — carried over, not yet blocking
+  since no slice has needed them for its done-check.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-A CLI command, `python -m app.catalog.sync`, introspects every table and
-column in the `olist` schema — data type, nullability, primary/foreign
-keys, live row count, and up to 5 sample values per column — and
-persists it into two new `app` schema tables, `catalog_tables` and
-`catalog_columns`, matching PRD.md §7's exact column shapes.
+For each of the 9 rows in `app.catalog_tables`, generate a one-paragraph
+natural-language description via a single Claude API call and persist it
+into `catalog_tables.description`, finishing PRD F4 / M1.
 
 Constraints:
-No LLM calls this slice — `catalog_tables.description` stays NULL;
-generating the one-paragraph LLM description per table (PRD.md F4: "run
-once, cached") is a separate, later slice, since it's a genuinely
-different outcome (introspection vs. LLM generation) with its own
-concerns (prompts/*.md, Pydantic validation, retry). No embeddings —
-`kb_chunks` / pgvector writes are M3 scope (PLAN.md), not this slice.
-Plain psycopg2, no ORM/SQLAlchemy (FastAPI/SQLAlchemy hasn't landed yet;
-stay consistent with the M1 seed slice's stack). Sync must be idempotent
-(safe to re-run — truncate + reinsert both catalog tables per run).
-Connects as the `POSTGRES_USER` owner role (needs to create the `app`
-schema and introspect `olist`) — never the `olist_ro` read-only role.
-No change to the `olist` schema tables themselves.
+New dependencies, pre-approved by the user for this slice: `anthropic`
+(the official SDK, for the API call) and `pydantic` (for validating the
+LLM's JSON output) — add both to `requirements.txt`. One strong
+Claude-Sonnet-class model per ARCHITECT.md; API key via a new
+`ANTHROPIC_API_KEY` env var (add to `.env.example`), model name
+env-configurable. The prompt lives in a new versioned file,
+`prompts/table_description.md` — never an inline string. The LLM's JSON
+response is validated by a Pydantic model with exactly one retry on
+validation failure; if the retry also fails for a table, the run must
+fail loudly (raise / non-zero exit) for that table — no silent skip, no
+placeholder text pretending to be a real description. "Run once, cached"
+(PRD F4): skip any table whose `description` is already non-NULL — never
+re-call the LLM for an already-described table. This slice's plan MUST
+explicitly resolve the open question above (`sync.py`'s TRUNCATE wiping
+cached descriptions on re-run) before implementation — likely by changing
+`sync.py` to UPSERT `catalog_tables` on `table_name` instead of
+truncating, preserving `description` across re-syncs; propose this at
+Gate 1, don't decide it silently mid-build. No embeddings/pgvector writes
+(`kb_chunks` stays untouched, M3 scope). Plain psycopg2 for all DB access,
+no ORM, consistent with the existing stack.
 
 Inputs:
-PRD.md §4 (F4 — Schema catalog) and §7 (Data Model, app schema — exact
-`catalog_tables`/`catalog_columns` column shapes); ARCHITECT.md (one
-Postgres instance, multiple schemas); the seeded `olist` schema and
-`olist_ro` user from the just-completed slice; Postgres
-`information_schema`/`pg_catalog` for introspection (columns, primary
-keys via `information_schema.table_constraints`/`key_column_usage`,
-foreign keys similarly).
+PRD.md §4 (F4) and §9 (Key Prompts, for prompt-file conventions);
+ARCHITECT.md's model/Pydantic/retry/prompt-versioning decisions;
+`app/catalog/sync.py`'s existing `catalog_tables`/`catalog_columns` data
+(`ddl_summary`, column names/types/sample values) as the context fed to
+the LLM per table; the working `ANTHROPIC_API_KEY` the user will provide
+locally in `.env` (gitignored).
 
 Outputs:
-- `app/__init__.py`, `app/catalog/__init__.py` — first code under the
-  `app/` package (the future FastAPI backend lives here from M4 on; this
-  slice only adds the catalog submodule).
-- `app/catalog/sync.py` — the CLI (`python -m app.catalog.sync`):
-  creates `app` schema + `catalog_tables`/`catalog_columns` tables if
-  absent, introspects all 9 `olist` tables, truncates and reinserts both
-  catalog tables each run.
-- `app/catalog/verify_sync.py` — the done-check script.
+- `prompts/table_description.md` — the versioned prompt template.
+- `app/catalog/describe.py` — the CLI (`python -m app.catalog.describe`):
+  for each `catalog_tables` row with `description IS NULL`, builds
+  context from that table's `ddl_summary` and its columns/sample values,
+  calls the LLM once, validates the response via Pydantic (one retry),
+  writes `description`.
+- A Pydantic model for the expected LLM JSON response shape (e.g. in
+  `app/catalog/describe.py` or a small new `app/catalog/models.py`).
+- `app/catalog/verify_describe.py` — the done-check script.
+- `sync.py` changed to UPSERT-preserve `description` across re-syncs (per
+  the Constraints resolution above) — exact mechanism decided at Gate 1.
+- `.env.example` gains `ANTHROPIC_API_KEY` (+ model-name var if made
+  configurable); `requirements.txt` gains `anthropic`, `pydantic`.
 
 Done-check:
-`python -m app.catalog.verify_sync` — exits 0 only if: `app.catalog_tables`
-has exactly 9 rows (one per `olist` table) with `row_count` matching the
-live `olist.*` counts; `app.catalog_columns` has exactly one row per real
-column of every `olist` table (matching `information_schema.columns`);
-every column with a real primary-key constraint has `is_pk = true` (no
-false positives or negatives); every column with a real foreign-key
-constraint has `is_fk = true` and the correct `ref_table`; every column's
-`sample_values_json` is populated with up to 5 values (fewer only when
-the table has fewer distinct values).
+`python -m app.catalog.verify_describe` exits 0 only if: every one of the
+9 `catalog_tables` rows has a non-NULL, non-blank `description` that
+reads as a genuine paragraph (not a stub); running
+`python -m app.catalog.describe` a second time makes zero additional LLM
+calls (all 9 tables already described) and still exits 0; running
+`python -m app.catalog.sync` after descriptions exist does NOT reset
+`description` back to NULL.
 
 Out-of-scope:
-LLM-generated table descriptions (`catalog_tables.description` stays
-NULL), embeddings/pgvector writes to `kb_chunks`, the business glossary
-(F5), any change to `olist` schema tables, FastAPI, frontend, CI,
-`prompts/*.md`.
+Embeddings/pgvector writes to `kb_chunks` (M3), the business glossary
+(F5), any change to `olist` schema tables or the shape of
+`catalog_columns`, FastAPI, frontend, CI, the chat/SQL-generation
+pipeline (M2).
