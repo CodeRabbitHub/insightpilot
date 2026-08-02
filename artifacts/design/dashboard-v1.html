@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InsightPilot — dashboard v1</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Tailwind CDN is mockup-only; the real app uses the Vite build. -->
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  body { font-family: 'Inter', system-ui, sans-serif; }
+  .viz-root {
+    --surface-1: #fcfcfb;
+    --ink-1: #0b0b0b;
+    --ink-2: #52514e;
+    --ink-muted: #898781;
+    --grid: #e1e0d9;
+    --baseline: #c3c2b7;
+    --series-1: #2a78d6;  /* blue */
+    --series-2: #eb6834;  /* orange */
+    --series-3: #1baf7a;  /* aqua */
+  }
+  .tnum { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body class="bg-zinc-50 text-zinc-900 antialiased">
+<div class="flex h-screen viz-root">
+
+  <!-- Sidebar (same shell as chat) -->
+  <aside class="w-64 shrink-0 border-r border-zinc-200 bg-white flex flex-col">
+    <div class="px-4 py-4 flex items-center gap-2 border-b border-zinc-100">
+      <div class="h-7 w-7 rounded-lg bg-indigo-600 flex items-center justify-center text-white text-sm font-bold">◆</div>
+      <span class="font-semibold tracking-tight">InsightPilot</span>
+    </div>
+    <div class="p-3">
+      <button class="w-full rounded-lg bg-zinc-900 text-white text-sm font-medium py-2 hover:bg-zinc-700 transition">
+        + New conversation
+      </button>
+    </div>
+    <nav class="flex-1 overflow-y-auto px-3 space-y-1">
+      <p class="px-2 pt-2 pb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Dashboards</p>
+      <a class="block rounded-lg px-3 py-2 text-sm bg-zinc-100 font-medium" href="#">▦ Overview</a>
+      <p class="px-2 pt-4 pb-1 text-[11px] font-medium uppercase tracking-wider text-zinc-400">Recent</p>
+      <a class="block rounded-lg px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 truncate" href="#">Revenue drop in March 2018</a>
+      <a class="block rounded-lg px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 truncate" href="#">Top categories by revenue</a>
+      <a class="block rounded-lg px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50 truncate" href="#">Delivery time by state</a>
+    </nav>
+    <div class="p-3 border-t border-zinc-100 flex items-center gap-2">
+      <div class="h-8 w-8 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center text-xs font-semibold">DA</div>
+      <div class="text-sm">
+        <p class="font-medium leading-tight">Demo Analyst</p>
+        <p class="text-xs text-zinc-400 leading-tight">demo@insightpilot.dev</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="flex-1 flex flex-col min-w-0">
+    <header class="h-14 shrink-0 border-b border-zinc-200 bg-white flex items-center justify-between px-6">
+      <div class="flex items-baseline gap-3">
+        <h1 class="text-base font-semibold tracking-tight">Overview</h1>
+        <span class="text-xs text-zinc-400">4 cards · refreshed on view</span>
+      </div>
+      <span class="text-xs rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 px-2.5 py-1 font-medium">
+        ● Olist dataset connected
+      </span>
+    </header>
+
+    <section class="flex-1 overflow-y-auto p-6">
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-5 max-w-6xl mx-auto">
+
+        <!-- Card 1: revenue trend (line) -->
+        <div class="rounded-xl border border-zinc-200 bg-[color:var(--surface-1)] p-5 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-sm font-semibold">Monthly revenue</h3>
+              <p class="text-xs text-[color:var(--ink-muted)] mt-0.5">Jan 2017 – Feb 2018 · R$ thousands</p>
+            </div>
+            <button class="h-7 w-7 rounded-md text-zinc-400 hover:bg-zinc-100" title="Card actions">⋯</button>
+          </div>
+          <svg viewBox="0 0 520 200" class="mt-3 w-full" role="img" aria-label="Line chart of monthly revenue, peaking in November 2017 at 320 thousand reais">
+            <line x1="40" y1="40"  x2="510" y2="40"  stroke="var(--grid)" stroke-width="1"/>
+            <line x1="40" y1="110" x2="510" y2="110" stroke="var(--grid)" stroke-width="1"/>
+            <line x1="40" y1="180" x2="510" y2="180" stroke="var(--baseline)" stroke-width="1"/>
+            <text x="34" y="44"  text-anchor="end" font-size="10" fill="var(--ink-muted)" class="tnum">320</text>
+            <text x="34" y="114" text-anchor="end" font-size="10" fill="var(--ink-muted)" class="tnum">160</text>
+            <text x="34" y="184" text-anchor="end" font-size="10" fill="var(--ink-muted)" class="tnum">0</text>
+            <polyline fill="none" stroke="var(--series-1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"
+              points="45,154 80,147 115,141 150,132 185,125 220,119 255,110 290,99 325,88 360,40 395,75 430,68 465,79 500,64"/>
+            <circle cx="360" cy="40" r="4" fill="var(--series-1)" stroke="var(--surface-1)" stroke-width="2"/>
+            <text x="360" y="28" text-anchor="middle" font-size="10" font-weight="600" fill="var(--ink-2)">Nov '17 · 320</text>
+            <text x="45"  y="196" font-size="10" fill="var(--ink-muted)">Jan</text>
+            <text x="150" y="196" font-size="10" fill="var(--ink-muted)">Apr</text>
+            <text x="255" y="196" font-size="10" fill="var(--ink-muted)">Jul</text>
+            <text x="360" y="196" font-size="10" fill="var(--ink-muted)">Oct</text>
+            <text x="465" y="196" font-size="10" fill="var(--ink-muted)">Jan '18</text>
+          </svg>
+        </div>
+
+        <!-- Card 2: top categories (horizontal bars) -->
+        <div class="rounded-xl border border-zinc-200 bg-[color:var(--surface-1)] p-5 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-sm font-semibold">Top categories by revenue</h3>
+              <p class="text-xs text-[color:var(--ink-muted)] mt-0.5">All time · R$ millions</p>
+            </div>
+            <button class="h-7 w-7 rounded-md text-zinc-400 hover:bg-zinc-100" title="Card actions">⋯</button>
+          </div>
+          <div class="mt-4 space-y-3">
+            <div>
+              <div class="flex justify-between text-xs mb-1"><span class="text-[color:var(--ink-2)]">beleza_saude</span><span class="tnum text-[color:var(--ink-2)] font-medium">1.26</span></div>
+              <div class="h-2 rounded-r bg-[color:var(--series-1)]" style="width:100%"></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs mb-1"><span class="text-[color:var(--ink-2)]">relogios_presentes</span><span class="tnum text-[color:var(--ink-2)]">1.19</span></div>
+              <div class="h-2 rounded-r bg-[color:var(--series-1)]" style="width:94%"></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs mb-1"><span class="text-[color:var(--ink-2)]">cama_mesa_banho</span><span class="tnum text-[color:var(--ink-2)]">1.03</span></div>
+              <div class="h-2 rounded-r bg-[color:var(--series-1)]" style="width:82%"></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs mb-1"><span class="text-[color:var(--ink-2)]">esporte_lazer</span><span class="tnum text-[color:var(--ink-2)]">0.99</span></div>
+              <div class="h-2 rounded-r bg-[color:var(--series-1)]" style="width:78%"></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs mb-1"><span class="text-[color:var(--ink-2)]">informatica_acessorios</span><span class="tnum text-[color:var(--ink-2)]">0.91</span></div>
+              <div class="h-2 rounded-r bg-[color:var(--series-1)]" style="width:72%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 3: review scores (vertical bars) -->
+        <div class="rounded-xl border border-zinc-200 bg-[color:var(--surface-1)] p-5 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-sm font-semibold">Review score distribution</h3>
+              <p class="text-xs text-[color:var(--ink-muted)] mt-0.5">All orders · thousands of reviews</p>
+            </div>
+            <button class="h-7 w-7 rounded-md text-zinc-400 hover:bg-zinc-100" title="Card actions">⋯</button>
+          </div>
+          <div class="mt-4 flex items-end justify-between gap-3 h-40 px-2">
+            <div class="flex-1 flex flex-col items-center gap-1">
+              <span class="text-xs tnum text-[color:var(--ink-2)]">11</span>
+              <div class="w-7 rounded-t bg-[color:var(--series-1)]" style="height:19%"></div>
+              <span class="text-xs text-[color:var(--ink-muted)]">1★</span>
+            </div>
+            <div class="flex-1 flex flex-col items-center gap-1">
+              <span class="text-xs tnum text-[color:var(--ink-2)]">3</span>
+              <div class="w-7 rounded-t bg-[color:var(--series-1)]" style="height:6%"></div>
+              <span class="text-xs text-[color:var(--ink-muted)]">2★</span>
+            </div>
+            <div class="flex-1 flex flex-col items-center gap-1">
+              <span class="text-xs tnum text-[color:var(--ink-2)]">8</span>
+              <div class="w-7 rounded-t bg-[color:var(--series-1)]" style="height:14%"></div>
+              <span class="text-xs text-[color:var(--ink-muted)]">3★</span>
+            </div>
+            <div class="flex-1 flex flex-col items-center gap-1">
+              <span class="text-xs tnum text-[color:var(--ink-2)]">19</span>
+              <div class="w-7 rounded-t bg-[color:var(--series-1)]" style="height:33%"></div>
+              <span class="text-xs text-[color:var(--ink-muted)]">4★</span>
+            </div>
+            <div class="flex-1 flex flex-col items-center gap-1">
+              <span class="text-xs tnum font-medium text-[color:var(--ink-2)]">57</span>
+              <div class="w-7 rounded-t bg-[color:var(--series-1)]" style="height:100%"></div>
+              <span class="text-xs text-[color:var(--ink-muted)]">5★</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Card 4: payment mix (donut) — actions menu shown open -->
+        <div class="relative rounded-xl border border-zinc-200 bg-[color:var(--surface-1)] p-5 shadow-sm">
+          <div class="flex items-start justify-between">
+            <div>
+              <h3 class="text-sm font-semibold">Payment methods</h3>
+              <p class="text-xs text-[color:var(--ink-muted)] mt-0.5">Share of orders</p>
+            </div>
+            <button class="h-7 w-7 rounded-md bg-zinc-100 text-zinc-600" title="Card actions">⋯</button>
+          </div>
+          <!-- open actions menu (mockup state) -->
+          <div class="absolute right-5 top-12 z-10 w-48 rounded-lg border border-zinc-200 bg-white shadow-lg py-1 text-sm">
+            <button class="w-full text-left px-3 py-1.5 hover:bg-zinc-50">✏️ Rename</button>
+            <button class="w-full text-left px-3 py-1.5 hover:bg-zinc-50">💬 Open originating chat</button>
+            <button class="w-full text-left px-3 py-1.5 text-red-600 hover:bg-red-50">🗑 Delete card</button>
+          </div>
+          <div class="mt-4 flex items-center gap-6">
+            <svg viewBox="0 0 140 140" class="w-36 h-36 shrink-0" role="img" aria-label="Donut chart: credit card 74 percent, boleto 19 percent, other 7 percent">
+              <g transform="rotate(-90 70 70)">
+                <circle cx="70" cy="70" r="54" fill="none" stroke="var(--series-1)" stroke-width="18"
+                  stroke-dasharray="248 91.3" stroke-dashoffset="0"/>
+                <circle cx="70" cy="70" r="54" fill="none" stroke="var(--series-2)" stroke-width="18"
+                  stroke-dasharray="61.5 277.8" stroke-dashoffset="-251"/>
+                <circle cx="70" cy="70" r="54" fill="none" stroke="var(--series-3)" stroke-width="18"
+                  stroke-dasharray="20.7 318.6" stroke-dashoffset="-315.5"/>
+              </g>
+              <text x="70" y="66" text-anchor="middle" font-size="20" font-weight="700" fill="var(--ink-1)" class="tnum">74%</text>
+              <text x="70" y="82" text-anchor="middle" font-size="9" fill="var(--ink-muted)">credit card</text>
+            </svg>
+            <ul class="space-y-2 text-sm">
+              <li class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full" style="background:var(--series-1)"></span>
+                <span class="text-[color:var(--ink-2)]">Credit card</span>
+                <span class="ml-auto tnum font-medium">74%</span>
+              </li>
+              <li class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full" style="background:var(--series-2)"></span>
+                <span class="text-[color:var(--ink-2)]">Boleto</span>
+                <span class="ml-auto tnum font-medium">19%</span>
+              </li>
+              <li class="flex items-center gap-2">
+                <span class="h-2.5 w-2.5 rounded-full" style="background:var(--series-3)"></span>
+                <span class="text-[color:var(--ink-2)]">Other</span>
+                <span class="ml-auto tnum font-medium">7%</span>
+              </li>
+            </ul>
+          </div>
+          <p class="mt-3 text-[11px] text-[color:var(--ink-muted)]">Pinned from: "How do customers pay?" · refreshed just now</p>
+        </div>
+
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>
