@@ -6,6 +6,10 @@ all required env vars with placeholder values" and the Constraints line
 Extended by plans/briefs/2026-08-02-llm-table-descriptions.md: a new
 `ANTHROPIC_API_KEY` var (plus an env-configurable model-name var) must be
 added alongside the existing connection vars.
+
+Extended by plans/briefs/2026-08-02-pgvector-schema-retrieval.md: a new
+`VOYAGE_API_KEY` var must be added for the Voyage AI embeddings provider,
+same precedent as ANTHROPIC_API_KEY's addition in the prior slice.
 """
 import re
 import unittest
@@ -23,6 +27,7 @@ REQUIRED_VARS = (
     "OLIST_RO_USER",
     "OLIST_RO_PASSWORD",
     "ANTHROPIC_API_KEY",
+    "VOYAGE_API_KEY",
 )
 
 

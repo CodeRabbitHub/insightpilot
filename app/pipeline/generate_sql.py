@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from string import Template
 
+import voyageai
 from anthropic import Anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel, field_validator
@@ -9,9 +10,9 @@ from pydantic import BaseModel, field_validator
 from app.catalog.describe import (
     extract_json_object,
     fetch_columns,
-    fetch_tables,
     format_columns_context,
 )
+from app.catalog.embed import VOYAGE_MODEL, embed_text, to_vector_literal
 from app.catalog.sync import connect, require_env
 
 load_dotenv()
@@ -21,6 +22,7 @@ PROMPT_FILE = REPO_ROOT / "prompts" / "generate_sql.md"
 PROMPT_TEMPLATE = Template(PROMPT_FILE.read_text(encoding="utf-8"))
 DEFAULT_MODEL = "claude-sonnet-5"
 MAX_RETRIES = 1
+RETRIEVAL_K = 5
 
 FIXED_QUESTION = "What are the top 5 product categories by number of orders?"
 
@@ -39,9 +41,25 @@ class GenerateSqlResponse(BaseModel):
         return stripped
 
 
-def build_schema_context(cur):
+def retrieve_relevant_tables(cur, voyage_client, question, k=RETRIEVAL_K):
+    """Top-k (table_id, table_name, description, ddl_summary) rows, ranked
+    by pgvector cosine distance between the question's embedding and each
+    table's stored description embedding."""
+    question_embedding = embed_text(voyage_client, VOYAGE_MODEL, question, "query")
+    cur.execute(
+        "SELECT ct.id, ct.table_name, ct.description, ct.ddl_summary "
+        "FROM app.catalog_embeddings ce "
+        "JOIN app.catalog_tables ct ON ct.id = ce.table_id "
+        "ORDER BY ce.embedding <=> %s::vector "
+        "LIMIT %s",
+        (to_vector_literal(question_embedding), k),
+    )
+    return cur.fetchall()
+
+
+def build_schema_context(cur, tables):
     blocks = []
-    for table_id, table_name, description, ddl_summary in fetch_tables(cur):
+    for table_id, table_name, description, ddl_summary in tables:
         if description is None:
             raise RuntimeError(
                 f"olist.{table_name} has no description yet -- run "
@@ -89,11 +107,13 @@ def generate_sql():
     api_key = require_env("ANTHROPIC_API_KEY")
     model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
     client = Anthropic(api_key=api_key)
+    voyage_client = voyageai.Client(api_key=require_env("VOYAGE_API_KEY"))
 
     conn = connect()
     try:
         with conn.cursor() as cur:
-            schema_context = build_schema_context(cur)
+            tables = retrieve_relevant_tables(cur, voyage_client, FIXED_QUESTION)
+            schema_context = build_schema_context(cur, tables)
     finally:
         conn.close()
 

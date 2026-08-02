@@ -7,12 +7,23 @@ response's `{"sql": "..."}` shape through a Pydantic model that only
 accepts SELECT statements, and returns the raw SQL string (it must not
 print -- the CLI's `main()` does that).
 
+Extended by plans/briefs/2026-08-02-pgvector-schema-retrieval.md:
+`build_schema_context()` no longer builds context from every olist table
+-- a new `retrieve_relevant_tables()` embeds the fixed question via
+Voyage AI and runs a pgvector top-k similarity search against
+`app.catalog_embeddings`, so schema context now comes from a real subset
+of the catalog, not a hardcoded full-table list.
+
 GenerateSqlEndToEndTests requires: docker compose db service running, the
-catalog already synced and described (prior slices), and a working
-ANTHROPIC_API_KEY in .env -- generate_sql() makes a REAL, billed call to
-the Anthropic API every time it runs (there is no "already done" cache
-like describe.py's), so the one call made in setUpClass is shared across
-every test in that class.
+catalog already synced, described, and embedded (prior slices), and
+working ANTHROPIC_API_KEY/VOYAGE_API_KEY in .env -- generate_sql() makes
+REAL, billed calls to both the Anthropic and Voyage APIs every time it
+runs (there is no "already done" cache like describe.py's/embed.py's for
+generate_sql() itself), so the one shared call made in setUpClass is
+reused across every test in that class. The retrieval-only test below
+reuses that same setUpClass state rather than making its own extra
+Voyage call, respecting this project's Voyage account's 3 RPM free-tier
+rate limit.
 
 GenerateSqlModuleConstantsTests and GenerateSqlResponseValidatorTests are
 pure unit tests: no network or DB calls, independent of whatever the LLM
@@ -24,11 +35,13 @@ response model) exist.
 import unittest
 
 import pydantic
+import voyageai
 
 from _catalog_helpers import run_sync
 from _describe_helpers import run_describe
 from _pg_helpers import get_admin_connection, olist_table_names
 
+from app.catalog.sync import require_env
 from app.pipeline import generate_sql
 
 
@@ -91,10 +104,28 @@ class GenerateSqlEndToEndTests(unittest.TestCase):
         cls.sync_result = run_sync()
         cls.describe_result = run_describe()
         cls.sql = None
+        cls.retrieved_tables = None
         if cls.sync_result.returncode == 0 and cls.describe_result.returncode == 0:
-            # One real Claude API call, shared across every test in this
-            # class so the suite doesn't re-bill the API per assertion.
+            # One real Claude API call (plus one real Voyage call for the
+            # fixed question's own embedding, inside generate_sql()),
+            # shared across every test in this class so the suite doesn't
+            # re-bill either API per assertion.
             cls.sql = generate_sql.generate_sql()
+
+            # One additional, shared Voyage call to exercise
+            # retrieve_relevant_tables() directly (generate_sql() above
+            # only returns the final SQL string, not the retrieved table
+            # list) -- reused by every test needing it, never repeated
+            # per-test, to respect the 3 RPM free-tier rate limit.
+            voyage_client = voyageai.Client(api_key=require_env("VOYAGE_API_KEY"))
+            conn = get_admin_connection()
+            try:
+                with conn.cursor() as cur:
+                    cls.retrieved_tables = generate_sql.retrieve_relevant_tables(
+                        cur, voyage_client, generate_sql.FIXED_QUESTION
+                    )
+            finally:
+                conn.close()
 
     def setUp(self):
         if self.sync_result.returncode != 0:
@@ -121,27 +152,52 @@ class GenerateSqlEndToEndTests(unittest.TestCase):
             f"generate_sql() did not return a SELECT statement: {self.sql!r}",
         )
 
-    def test_build_schema_context_covers_all_nine_tables(self):
+    def test_retrieve_relevant_tables_returns_a_real_subset_not_the_full_catalog(self):
+        # Per the pgvector-schema-retrieval brief: retrieval must return a
+        # genuine top-k subset, never a hardcoded full-table-list check.
+        # We only assert it's fewer than all 9 tables (proving it's
+        # actually top-k retrieval) and that the two tables the fixed
+        # question needs (order_items for order counts, products for
+        # category names) rank in that subset.
         conn = get_admin_connection()
         try:
             with conn.cursor() as cur:
-                table_names = olist_table_names(cur)
-                self.assertEqual(
-                    len(table_names),
-                    9,
-                    f"expected 9 olist tables, found {len(table_names)}",
-                )
-                context = generate_sql.build_schema_context(cur)
+                total_table_count = len(olist_table_names(cur))
         finally:
             conn.close()
+        self.assertEqual(
+            total_table_count, 9, f"expected 9 olist tables, found {total_table_count}"
+        )
 
-        self.assertIsInstance(context, str)
-        for table_name in table_names:
-            self.assertIn(
-                f"olist.{table_name}",
-                context,
-                f"build_schema_context() output is missing olist.{table_name}",
-            )
+        self.assertIsNotNone(
+            self.retrieved_tables,
+            "retrieve_relevant_tables() was not exercised in setUpClass "
+            "(a prior sync/describe step must have failed)",
+        )
+        retrieved_table_names = {
+            table_name for _table_id, table_name, _description, _ddl_summary
+            in self.retrieved_tables
+        }
+
+        self.assertLess(
+            len(retrieved_table_names),
+            total_table_count,
+            f"retrieve_relevant_tables() returned {len(retrieved_table_names)} "
+            f"tables out of {total_table_count} -- expected a genuine top-k "
+            "subset, not the full catalog",
+        )
+        self.assertIn(
+            "order_items",
+            retrieved_table_names,
+            f"retrieve_relevant_tables() did not include order_items in its "
+            f"top-k result for the fixed question: {retrieved_table_names}",
+        )
+        self.assertIn(
+            "products",
+            retrieved_table_names,
+            f"retrieve_relevant_tables() did not include products in its "
+            f"top-k result for the fixed question: {retrieved_table_names}",
+        )
 
 
 if __name__ == "__main__":
