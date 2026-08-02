@@ -42,6 +42,15 @@ Dead code is a lie about what the program does. Delete it.
 - [ ] The unhappy path — what happens when the thing it depends on is down
 - [ ] Concurrency, if anything here can run in parallel
 - [ ] The eval from the brief actually covers what "done" means — not just the happy path
+- [ ] A claimed restriction or failure path is proven by actually
+      triggering it (run the restricted action, expect the real error) —
+      not by only checking a config/grant/state proxy for it. A privilege
+      check or a "this is handled" comment can pass while the behavior it
+      implies is never exercised (caught twice: 2026-08-02
+      foundation-db-seed's env-var KeyError fix originally shipped with no
+      test forcing the missing-var path; 2026-08-02 catalog-sync-cli's RO
+      test checked `has_schema_privilege()` instead of actually running the
+      CLI as the restricted role)
 
 ## 6. Comments
 
