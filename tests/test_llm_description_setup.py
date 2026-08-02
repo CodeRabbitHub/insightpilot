@@ -27,6 +27,11 @@ PROMPT_FILE = REPO_ROOT / "prompts" / "table_description.md"
 # a loose "at least these exist" check.
 PRE_EXISTING_PACKAGES = {"psycopg2-binary", "python-dotenv"}
 NEWLY_APPROVED_PACKAGES = {"anthropic", "pydantic"}
+# Extended by plans/briefs/2026-08-02-validate-sql.md: sqlglot is a
+# second, separately pre-approved dependency (ARCHITECT.md's own
+# defense-in-depth wording names it), added by a later slice than the one
+# this test file's docstring describes.
+NEWLY_APPROVED_PACKAGES |= {"sqlglot"}
 
 
 def _package_names(text):

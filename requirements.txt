@@ -2,3 +2,4 @@ psycopg2-binary==2.9.12
 python-dotenv==1.2.2
 anthropic==0.120.2
 pydantic==2.13.4
+sqlglot==30.14.0

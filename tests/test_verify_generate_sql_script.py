@@ -12,27 +12,30 @@ ANTHROPIC_API_KEY in .env -- it makes a REAL, billed call to the
 Anthropic API via generate_sql() (no "already done" cache exists for
 this slice).
 
-CheckReferencesTests is pure unit-level: no API or DB calls, exercising
-the alias-aware regex tokenizer described in the approved plan directly
-against hand-built SQL strings and a hand-built fake catalog. This is
-called out as the brief's trickiest logic (a hand-rolled tokenizer, not
-sqlglot) so it gets the most direct scrutiny here rather than relying
-only on the end-to-end pass/fail above. Forcing a genuine end-to-end
-*failure* of the CLI (e.g. a hallucinated table) would require mocking
-the Anthropic response, which this project's convention (real
-infrastructure, no mocks) rules out -- matching test_verify_describe_
-script.py's equivalent note for describe.py's retry-failure path.
+ValidateSqlTests is the sqlglot-based validator's unit-level coverage
+(plans/briefs/2026-08-02-validate-sql.md): direct calls into
+app.pipeline.validate_sql's parse_single_select/check_table_references/
+check_column_references against hand-built fake schema dicts, no DB
+cursor and no API calls required. It replaced the prior slice's
+hand-rolled regex tokenizer (check_references) and its dedicated test
+class, now that the sqlglot validator is proven equivalent-or-better on
+the same hallucinated-table/hallucinated-column scenarios.
 
-Will fail honestly until app/pipeline/verify_generate_sql.py (and its
-check_references function) exist.
+Will fail honestly until app/pipeline/verify_generate_sql.py exists.
 """
 import unittest
 
 from _catalog_helpers import run_sync
 from _describe_helpers import run_describe
 from _generate_sql_helpers import run_verify_generate_sql
+from sqlglot import exp
 
-from app.pipeline import verify_generate_sql
+from app.pipeline.validate_sql import (
+    SqlValidationError,
+    check_column_references,
+    check_table_references,
+    parse_single_select,
+)
 
 
 class VerifyGenerateSqlDoneCheckTests(unittest.TestCase):
@@ -79,111 +82,238 @@ class VerifyGenerateSqlDoneCheckTests(unittest.TestCase):
         )
 
 
-class CheckReferencesTests(unittest.TestCase):
-    """Direct, hand-built unit tests for the alias-aware reference
-    checker described in the approved plan: strip string literals, match
-    olist.<table> and <alias>.<column> dotted pairs, collect AS-aliases
-    and FROM/JOIN implicit aliases, then confirm any remaining bare
-    identifier is a known table or column name. valid_tables/valid_columns
-    are hand-built fakes here (not a live DB query) so this class can run
-    with no infrastructure at all, per the brief's emphasis that this
-    tokenizer logic deserves the most direct unit-level scrutiny."""
+class ValidateSqlTests(unittest.TestCase):
+    """Direct, hand-built unit tests for the sqlglot-based validator
+    (plans/briefs/2026-08-02-validate-sql.md): no DB cursor and no API
+    calls, exercising parse_single_select/check_table_references/
+    check_column_references directly against hand-built SQL strings and a
+    hand-built fake per-table schema dict (the shape fetch_catalog_schema
+    is meant to return, so these functions can be tested without a live
+    app.catalog_tables/app.catalog_columns query). The fixed question's
+    real generated-SQL shape, a multi-statement string, a non-SELECT
+    statement, a hallucinated table name, and a hallucinated column name
+    are the four deliberately-invalid scenarios the brief's done-check
+    calls out by name; a trailing-semicolon and a CTE-name case are added
+    because the brief explicitly describes both as things the parser must
+    NOT misclassify as a second statement or an unknown table,
+    respectively.
+    """
 
-    VALID_TABLES = {"orders", "order_items", "products", "customers"}
-    VALID_COLUMNS = {
-        "order_id",
-        "product_id",
-        "customer_id",
-        "product_category_name",
-        "price",
-        "order_status",
+    SCHEMA = {
+        "order_items": {"order_id": "TEXT", "product_id": "TEXT"},
+        "products": {"product_id": "TEXT", "product_category_name": "TEXT"},
     }
 
-    def test_passes_a_query_with_table_and_output_aliases(self):
-        sql = (
-            "SELECT p.product_category_name, COUNT(*) AS order_count "
-            "FROM olist.order_items oi "
-            "JOIN olist.products p ON oi.product_id = p.product_id "
-            "GROUP BY p.product_category_name "
-            "ORDER BY order_count DESC "
-            "LIMIT 5"
-        )
-        failures = verify_generate_sql.check_references(
-            sql, self.VALID_TABLES, self.VALID_COLUMNS
-        )
-        self.assertFalse(
-            failures,
-            f"expected no failures for a valid aliased query, got {failures}",
+    FIXED_QUESTION_SQL = (
+        "SELECT p.product_category_name, COUNT(DISTINCT oi.order_id) AS num_orders "
+        "FROM olist.order_items oi "
+        "JOIN olist.products p ON oi.product_id = p.product_id "
+        "GROUP BY p.product_category_name "
+        "ORDER BY num_orders DESC "
+        "LIMIT 5"
+    )
+
+    def test_the_real_fixed_question_sql_passes_parse_table_and_column_checks(self):
+        statement = parse_single_select(self.FIXED_QUESTION_SQL)
+        try:
+            check_table_references(statement, set(self.SCHEMA))
+            check_column_references(statement, self.SCHEMA)
+        except SqlValidationError as exc:
+            self.fail(
+                "expected the fixed question's real generated SQL to pass "
+                f"validation with no exception, but got: {exc}"
+            )
+
+    def test_a_multi_statement_string_is_rejected_by_parse_single_select(self):
+        sql = "SELECT * FROM olist.products; DROP TABLE olist.products;"
+        with self.assertRaises(SqlValidationError) as ctx:
+            parse_single_select(sql)
+        message = str(ctx.exception).lower()
+        self.assertIn(
+            "statement",
+            message,
+            "expected the exception message to mention the statement "
+            f"count problem, got: {ctx.exception}",
         )
 
-    def test_passes_a_query_with_where_clause_alias_column_reference(self):
-        sql = (
-            "SELECT c.customer_id, COUNT(*) AS order_count "
-            "FROM olist.orders o "
-            "JOIN olist.customers c ON o.customer_id = c.customer_id "
-            "WHERE o.order_status = 'delivered' "
-            "GROUP BY c.customer_id"
-        )
-        failures = verify_generate_sql.check_references(
-            sql, self.VALID_TABLES, self.VALID_COLUMNS
-        )
-        self.assertFalse(
-            failures,
-            f"expected no failures for a valid alias.column WHERE clause, "
-            f"got {failures}",
+    def test_a_non_select_statement_is_rejected_by_parse_single_select(self):
+        sql = "DELETE FROM olist.products"
+        with self.assertRaises(SqlValidationError) as ctx:
+            parse_single_select(sql)
+        message = str(ctx.exception).lower()
+        self.assertIn(
+            "select",
+            message,
+            "expected the exception message to name that the statement "
+            f"isn't a SELECT, got: {ctx.exception}",
         )
 
-    def test_ignores_identifier_look_alikes_inside_string_literals(self):
-        sql = (
-            "SELECT o.order_status FROM olist.orders o "
-            "WHERE o.order_status = 'olist.not_a_real_table'"
-        )
-        failures = verify_generate_sql.check_references(
-            sql, self.VALID_TABLES, self.VALID_COLUMNS
-        )
-        self.assertFalse(
-            failures,
-            "a fake dotted identifier inside a string literal should "
-            f"never be treated as a real reference, got {failures}",
+    def test_a_hallucinated_table_name_is_rejected_by_check_table_references(self):
+        sql = "SELECT nt.order_id FROM olist.nonexistent_table nt"
+        statement = parse_single_select(sql)
+        with self.assertRaises(SqlValidationError) as ctx:
+            check_table_references(statement, set(self.SCHEMA))
+        self.assertIn(
+            "nonexistent_table",
+            str(ctx.exception),
+            "expected the exception message to name the hallucinated "
+            f"table, got: {ctx.exception}",
         )
 
-    def test_does_not_false_positive_on_sql_keywords_and_aggregate_functions(self):
-        sql = (
-            "SELECT p.product_category_name, COUNT(*) AS order_count "
-            "FROM olist.order_items oi "
-            "JOIN olist.products p ON oi.product_id = p.product_id "
-            "GROUP BY p.product_category_name "
-            "HAVING COUNT(*) > 10 "
-            "ORDER BY order_count DESC, p.product_category_name ASC "
-            "LIMIT 5"
-        )
-        failures = verify_generate_sql.check_references(
-            sql, self.VALID_TABLES, self.VALID_COLUMNS
-        )
-        self.assertFalse(
-            failures,
-            "SQL keywords/aggregate functions must not be treated as "
-            f"unknown identifiers, got {failures}",
-        )
-
-    def test_fails_on_a_hallucinated_table_name(self):
-        sql = (
-            "SELECT * FROM olist.nonexistent_table nt "
-            "JOIN olist.orders o ON nt.order_id = o.order_id"
-        )
-        failures = verify_generate_sql.check_references(
-            sql, self.VALID_TABLES, self.VALID_COLUMNS
-        )
-        self.assertTrue(failures, "expected a failure for a hallucinated table name")
-        self.assertIn("nonexistent_table", str(failures))
-
-    def test_fails_on_a_hallucinated_column_name(self):
+    def test_a_hallucinated_column_name_is_rejected_by_check_column_references(self):
         sql = "SELECT p.totally_made_up_column FROM olist.products p"
-        failures = verify_generate_sql.check_references(
-            sql, self.VALID_TABLES, self.VALID_COLUMNS
+        statement = parse_single_select(sql)
+
+        # table-check must pass first: "products" is a real table, only
+        # the column is invented.
+        try:
+            check_table_references(statement, set(self.SCHEMA))
+        except SqlValidationError as exc:
+            self.fail(
+                "expected the table check to pass for a real table with "
+                f"only a hallucinated column, but got: {exc}"
+            )
+
+        with self.assertRaises(SqlValidationError) as ctx:
+            check_column_references(statement, self.SCHEMA)
+        self.assertIn(
+            "totally_made_up_column",
+            str(ctx.exception),
+            "expected the exception message to name the hallucinated "
+            f"column, got: {ctx.exception}",
         )
-        self.assertTrue(failures, "expected a failure for a hallucinated column name")
-        self.assertIn("totally_made_up_column", str(failures))
+
+    def test_a_trailing_semicolon_alone_is_not_a_second_statement(self):
+        sql = "SELECT * FROM olist.products;"
+        try:
+            statement = parse_single_select(sql)
+        except SqlValidationError as exc:
+            self.fail(
+                "a lone trailing semicolon must not be treated as a "
+                f"second statement, but parse_single_select raised: {exc}"
+            )
+        self.assertIsInstance(
+            statement,
+            exp.Select,
+            f"expected a single parsed SELECT expression, got: {statement!r}",
+        )
+
+    def test_a_wrong_schema_qualifier_is_rejected_even_if_the_table_basename_is_real(
+        self,
+    ):
+        # "products" is a real table name, but only under olist -- a
+        # reference to it under any other schema must still be rejected,
+        # not waved through because the bare basename happens to match.
+        sql = "SELECT * FROM pg_catalog.products"
+        statement = parse_single_select(sql)
+        with self.assertRaises(SqlValidationError) as ctx:
+            check_table_references(statement, set(self.SCHEMA))
+        self.assertIn(
+            "pg_catalog.products",
+            str(ctx.exception),
+            "expected the exception message to name the wrongly-qualified "
+            f"table reference, got: {ctx.exception}",
+        )
+
+    def test_a_differently_cased_table_or_cte_name_is_not_wrongly_flagged_as_unknown(
+        self,
+    ):
+        # Postgres folds unquoted identifiers to lowercase, so
+        # olist.PRODUCTS and a CTE named RECENT referenced as "recent" are
+        # both real, valid references -- the qualifier check already
+        # normalizes case, so name/CTE-name matching must too, or a valid
+        # reference could be spuriously rejected as "unknown".
+        statement = parse_single_select("SELECT * FROM olist.PRODUCTS")
+        try:
+            check_table_references(statement, set(self.SCHEMA))
+        except SqlValidationError as exc:
+            self.fail(
+                "a differently-cased but real table name must not be "
+                f"rejected as unknown, but got: {exc}"
+            )
+
+        cte_statement = parse_single_select(
+            "WITH RECENT AS (SELECT product_id FROM olist.products) "
+            "SELECT * FROM recent"
+        )
+        try:
+            check_table_references(cte_statement, {"products"})
+        except SqlValidationError as exc:
+            self.fail(
+                "a case-mismatched CTE name/reference pair must still "
+                f"resolve to the CTE, not an unknown table, but got: {exc}"
+            )
+
+    def test_a_table_valued_function_call_is_rejected_with_a_specific_message(self):
+        # A table-valued function call (e.g. generate_series) also parses
+        # as exp.Table but with an empty .name -- the rejection message
+        # must still name the actual problem, not read as a bare "olist.".
+        sql = "SELECT * FROM generate_series(1, 10) AS t(n)"
+        statement = parse_single_select(sql)
+        with self.assertRaises(SqlValidationError) as ctx:
+            check_table_references(statement, set(self.SCHEMA))
+        message = str(ctx.exception)
+        self.assertIn(
+            "generate_series",
+            message.lower(),
+            "expected the exception message to name the table-valued "
+            f"function call instead of a bare 'olist.', got: {message}",
+        )
+
+    def test_a_catalog_only_qualifier_is_rejected_the_same_as_a_schema_qualifier(
+        self,
+    ):
+        # sqlglot's "catalog..table" double-dot form leaves .db empty and
+        # puts the qualifying text in .catalog instead -- a schema-only
+        # check would treat this identically to a bare, unqualified
+        # reference and wrongly allow it. Both qualifier fields must be
+        # checked, combined, so this is rejected the same way
+        # pg_catalog.products is.
+        sql = "SELECT * FROM pg_catalog..products"
+        statement = parse_single_select(sql)
+        with self.assertRaises(SqlValidationError) as ctx:
+            check_table_references(statement, set(self.SCHEMA))
+        self.assertIn(
+            "pg_catalog.products",
+            str(ctx.exception),
+            "expected the exception message to name the wrongly-qualified "
+            f"table reference, got: {ctx.exception}",
+        )
+
+    def test_a_cte_name_does_not_mask_a_schema_qualified_reference_to_the_same_name(
+        self,
+    ):
+        # A CTE is only ever addressed unqualified. A CTE named "products"
+        # must not exempt a *schema-qualified* reference to "products"
+        # elsewhere in the same query -- that can never actually be the
+        # CTE, and letting it through would mask a real cross-schema leak.
+        sql = (
+            "WITH products AS (SELECT 1 AS x) "
+            "SELECT * FROM pg_catalog.products"
+        )
+        statement = parse_single_select(sql)
+        with self.assertRaises(SqlValidationError) as ctx:
+            check_table_references(statement, {"products"})
+        self.assertIn(
+            "pg_catalog.products",
+            str(ctx.exception),
+            "expected the exception message to name the wrongly-qualified "
+            f"reference despite the same-named CTE, got: {ctx.exception}",
+        )
+
+    def test_a_cte_name_is_not_mistaken_for_an_unknown_table(self):
+        sql = (
+            "WITH recent AS (SELECT product_id FROM olist.products) "
+            "SELECT * FROM recent"
+        )
+        statement = parse_single_select(sql)
+        try:
+            check_table_references(statement, {"products"})
+        except SqlValidationError as exc:
+            self.fail(
+                "a CTE's own name ('recent') is not a catalog table and "
+                f"must not be flagged as an unknown table reference: {exc}"
+            )
 
 
 if __name__ == "__main__":
