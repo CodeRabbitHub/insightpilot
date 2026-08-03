@@ -646,3 +646,26 @@ Date:   Mon Aug 3 14:15:05 2026 +0530
  CLAUDE.md | 2 ++
  1 file changed, 2 insertions(+)
 ```
+
+## Commit at 2026-08-03 14:26
+```
+commit 695b796117499736e7253b5809dbea7f9e44117d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 14:26:42 2026 +0530
+
+    Capture + handoff: eval-harness-v1 slice done, next brief is glossary retrieval
+    
+    Slice log for the eval harness v1 slice (commit cd1edf0), and HANDOFF.md
+    rewritten with this session's verified state plus the next brief:
+    business glossary retrieval (F5), applying the same pgvector top-k
+    pattern already built for schema retrieval to a seeded glossary.md of
+    KPI definitions.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ HANDOFF.md                               | 321 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------
+ plans/logs/2026-08-03-eval-harness-v1.md |  94 +++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md              |  61 +++++++++++++++++++++++++++++++
+ 3 files changed, 312 insertions(+), 164 deletions(-)
+```

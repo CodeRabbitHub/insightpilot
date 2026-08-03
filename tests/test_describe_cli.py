@@ -191,21 +191,49 @@ class DescribeCliTests(unittest.TestCase):
             "back to NULL (or changed them) after they already existed",
         )
 
-    def test_describe_does_not_create_a_kb_chunks_table(self):
-        # Out-of-scope per the brief: "no embeddings/pgvector writes to
-        # kb_chunks (M3 scope)". A conforming describe.py never needs to
-        # create that table at all in this slice.
-        with self.conn.cursor() as cur:
+    def test_describe_does_not_touch_kb_chunks(self):
+        # Out-of-scope per the llm-table-descriptions brief: describe.py's
+        # own job is filling in catalog_tables.description, never touching
+        # kb_chunks. The glossary-retrieval brief
+        # (plans/briefs/2026-08-03-glossary-retrieval.md) later creates and
+        # populates app.kb_chunks for real (via app/glossary/embed.py), so
+        # a "kb_chunks doesn't exist" check would fail by design once that
+        # slice lands. This proves the real behavior instead: running
+        # describe.py again leaves kb_chunks exactly as it was -- same
+        # existence, same row count -- whether or not the table happens to
+        # exist yet.
+        def _kb_chunks_state(cur):
             cur.execute(
                 "SELECT COUNT(*) FROM information_schema.tables "
-                "WHERE table_name = 'kb_chunks'"
+                "WHERE table_schema = 'app' AND table_name = 'kb_chunks'"
             )
-            count = cur.fetchone()[0]
+            exists = cur.fetchone()[0] == 1
+            row_count = None
+            if exists:
+                cur.execute("SELECT COUNT(*) FROM app.kb_chunks")
+                row_count = cur.fetchone()[0]
+            return exists, row_count
+
+        with self.conn.cursor() as cur:
+            before = _kb_chunks_state(cur)
+
+        result = run_describe()
         self.assertEqual(
-            count,
+            result.returncode,
             0,
-            "an app.kb_chunks (or similarly named) table exists -- "
-            "embeddings/pgvector writes are out of scope for this slice",
+            "a second python -m app.catalog.describe run did not exit 0:\n"
+            f"stdout={result.stdout}\nstderr={result.stderr}",
+        )
+
+        with self.conn.cursor() as cur:
+            after = _kb_chunks_state(cur)
+
+        self.assertEqual(
+            before,
+            after,
+            "python -m app.catalog.describe changed app.kb_chunks's "
+            f"existence/row count ({before} -> {after}) -- describe.py "
+            "must never write to kb_chunks",
         )
 
     def test_catalog_columns_shape_is_unchanged(self):

@@ -27,7 +27,16 @@ EMBEDDING_DIMENSION = 1024
 # would just repeat the same failure -- only a real wait for the rate
 # window to clear (~20s per allowed slot) gives a retry a chance to
 # succeed.
-RATE_LIMIT_MAX_ATTEMPTS = 4
+#
+# 6 attempts, not 4: the glossary-retrieval slice
+# (plans/briefs/2026-08-03-glossary-retrieval.md) doubled
+# generate_sql()'s Voyage calls per question (schema + glossary
+# retrieval), and a real full-suite run this slice hit a genuine
+# RateLimitError exhaustion at 4 attempts (60s of backoff) during a
+# contended window -- 6 attempts (100s of backoff) gave real headroom to
+# outlast sustained contention across the many real-Voyage-call tests in
+# one run.
+RATE_LIMIT_MAX_ATTEMPTS = 6
 RATE_LIMIT_RETRY_DELAY_SECONDS = 20
 
 

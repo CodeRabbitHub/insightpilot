@@ -23,6 +23,9 @@ Respond with ONLY a JSON object of this exact shape, no other text before
 or after it:
 {"sql": "<the SELECT statement>"}
 
+Business glossary (KPI definitions relevant to this question):
+$glossary_context
+
 Schema catalog:
 $schema_context
 
