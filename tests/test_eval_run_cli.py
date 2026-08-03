@@ -1,22 +1,24 @@
 """
 The eval-harness-v1 brief's literal done-check
 (plans/briefs/2026-08-02-eval-harness-v1.md): `python -m evals.run` exits
-0 and prints a real accuracy score (e.g. "5/5 correct" or honestly
-fewer) for the 5 curated questions in `evals/questions.yaml`.
+0 and prints a real accuracy score (e.g. "N/N correct" or honestly fewer)
+for the curated questions in `evals/questions.yaml` (5 originally; the
+glossary-retrieval slice added a 6th, and this set is expected to keep
+growing per templates/eval.md's "every production/demo failure adds a
+case").
 
 Requires: docker compose db service running, the catalog already synced
 and described (prior slices), a working ANTHROPIC_API_KEY/VOYAGE_API_KEY
-in .env, and a real evals/questions.yaml with 5 hand-verified questions
-(this slice's own Outputs) -- it makes 5 real, sequential, billed calls
-to the Anthropic API (one per question, via generate_sql()) plus 5 real
-Voyage embedding calls and 5 real executes against the read-only asyncpg
-connection.
+in .env, and a real evals/questions.yaml with hand-verified questions --
+it makes one real, sequential, billed Anthropic call and one real Voyage
+embedding call per question (via generate_sql()), plus one real execute
+per question against the read-only asyncpg connection.
 
 This does not assert any particular accuracy score (the brief explicitly
-allows "or honestly fewer" than 5/5) -- only that the command exits 0 and
-reports a real, well-formed summary and per-question result lines, per
-the Outputs' "prints a per-question PASS/FAIL line and a final 'N/5
-correct' summary".
+allows "or honestly fewer" than a perfect score) -- only that the command
+exits 0 and reports a real, well-formed summary and per-question result
+lines, per the Outputs' "prints a per-question PASS/FAIL line and a final
+'N/M correct' summary".
 
 Will fail honestly until evals/run.py and evals/questions.yaml both exist.
 """
@@ -59,16 +61,21 @@ class EvalRunDoneCheckTests(unittest.TestCase):
             f"stdout={result.stdout}\nstderr={result.stderr}",
         )
 
-    def test_evals_run_stdout_reports_an_n_out_of_5_correct_summary(self):
+    def test_evals_run_stdout_reports_an_n_out_of_m_correct_summary(self):
+        # Not hardcoded to /5: evals/questions.yaml has grown to 6 since
+        # the glossary-retrieval slice (plans/briefs/2026-08-03-glossary-
+        # retrieval.md) added a 6th question, and templates/eval.md's own
+        # "start with 5; every production/demo failure adds a case"
+        # lifecycle means the denominator keeps growing legitimately.
         self._require_described_catalog()
 
         result = run_evals()
         self.assertRegex(
             result.stdout,
-            re.compile(r"\d+/5 correct", re.IGNORECASE),
-            "expected an 'N/5 correct' style summary line in stdout "
-            f"(the brief allows any real score, not necessarily 5/5):\n"
-            f"stdout={result.stdout}",
+            re.compile(r"\d+/\d+ correct", re.IGNORECASE),
+            "expected an 'N/M correct' style summary line in stdout "
+            f"(the brief allows any real score, not necessarily a perfect "
+            f"one):\nstdout={result.stdout}",
         )
 
     def test_evals_run_stdout_reports_a_pass_or_fail_line_per_question(self):

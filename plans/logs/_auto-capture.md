@@ -669,3 +669,49 @@ Date:   Mon Aug 3 14:26:42 2026 +0530
  plans/logs/_auto-capture.md              |  61 +++++++++++++++++++++++++++++++
  3 files changed, 312 insertions(+), 164 deletions(-)
 ```
+
+## Commit at 2026-08-03 19:12
+```
+commit a0005130451822ce941a56cad71e9b82de86099e
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 19:12:37 2026 +0530
+
+    Business glossary retrieval: pgvector KPI context alongside schema context
+    
+    generate_sql() now retrieves top-k business-glossary entries (16 KPI
+    definitions in glossary.md, embedded into app.kb_chunks via a new
+    app/glossary/ package mirroring app/catalog/embed.py's convention) and
+    threads them into the prompt alongside the existing schema retrieval, per
+    PRD F5. Caught and fixed a real regression mid-slice: the first draft of
+    two KPI definitions was too prescriptive and dropped the eval from 5/5 to
+    3/5 by leaking into unrelated questions.
+    
+    Also bumps RATE_LIMIT_MAX_ATTEMPTS and several test/hook timeouts to
+    absorb the doubled Voyage call load this adds to generate_sql().
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ .claude/hooks/stop_verify.py                       |  25 +++++++++--------
+ CLAUDE.md                                          |   4 ++-
+ app/catalog/embed.py                               |  11 +++++++-
+ app/glossary/__init__.py                           |   0
+ app/glossary/embed.py                              | 103 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ app/glossary/verify_embed.py                       |  61 ++++++++++++++++++++++++++++++++++++++++
+ app/pipeline/generate_sql.py                       |  40 ++++++++++++++++++++++++---
+ artifacts/reviews/2026-08-03-glossary-retrieval.md | 159 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ glossary.md                                        | 152 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-03-glossary-retrieval.md      |  82 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                        |  23 ++++++++++++++++
+ prompts/generate_sql.md                            |   3 ++
+ tests/_answer_helpers.py                           |  10 ++++++-
+ tests/_generate_sql_helpers.py                     |  10 ++++++-
+ tests/_glossary_helpers.py                         |  72 ++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_describe_cli.py                         |  48 +++++++++++++++++++++++++-------
+ tests/test_generate_sql_prompt_file.py             |  63 ++++++++++++++++++++++++++++++++++++++++++
+ tests/test_glossary_embed.py                       | 228 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_glossary_parsing.py                     | 204 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_glossary_retrieval.py                   | 160 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_glossary_verify_embed.py                | 108 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 21 files changed, 1537 insertions(+), 29 deletions(-)
+```

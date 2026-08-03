@@ -1,9 +1,17 @@
-# 5 curated questions for the eval harness (plans/briefs/2026-08-02-eval-harness-v1.md).
+# Curated questions for the eval harness (plans/briefs/2026-08-02-eval-harness-v1.md).
 # Every `expected` value below was hand-verified against the real `olist`
-# database on 2026-08-03 (queries run and their output captured in this
+# database on 2026-08-03 (queries run and their output captured in the
 # slice's log at plans/logs/, written at the /capture step). Grading is
 # exact-match/code-assertion only, per
 # evals/run.py's check_expected() -- no LLM-as-judge.
+#
+# The 6th question (average order value) was added by the
+# glossary-retrieval slice (plans/briefs/2026-08-03-glossary-retrieval.md)
+# specifically to exercise a KPI whose correct SQL depends on glossary
+# context (AOV's formula), after that slice caught a real regression
+# where glossary wording changed unrelated questions' SQL -- the original
+# 5 questions caught that regression by accident, not because any of them
+# specifically exercises glossary-informed KPI computation.
 #
 # expected.top_row: the first result row's values must contain all of
 # these (order/column-name agnostic, since the LLM may alias columns
@@ -32,3 +40,8 @@
   expected:
     scalar: 4.0864
     tolerance: 0.05
+
+- question: "What is the average order value?"
+  expected:
+    scalar: 137.7541
+    tolerance: 0.01

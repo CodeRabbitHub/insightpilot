@@ -44,17 +44,21 @@ class EvalQuestionsYamlTests(unittest.TestCase):
             f"evals/questions.yaml must parse to a YAML list, got: {type(data)}",
         )
 
-    def test_starts_with_exactly_five_questions(self):
-        # Per the brief's Constraints: "Start with exactly 5 questions,
-        # per templates/eval.md's 'start with 5' and PRD.md Section 10's
-        # eventual 30 being an M8 (not M3) target."
+    def test_starts_with_at_least_five_questions(self):
+        # Per the eval-harness-v1 brief's Constraints: "Start with exactly
+        # 5 questions, per templates/eval.md's 'start with 5'..." --
+        # templates/eval.md itself says "start with 5; every
+        # production/demo failure adds a case," so growth beyond 5 is the
+        # documented lifecycle, not a violation (the glossary-retrieval
+        # slice added a 6th after a real regression). PRD.md Section 10's
+        # eventual 30 is still an M8 (not M3) target -- this only checks
+        # the floor, not a ceiling.
         data = self._load()
-        self.assertEqual(
+        self.assertGreaterEqual(
             len(data),
             5,
-            f"evals/questions.yaml must start with exactly 5 questions "
-            f"(the eventual 30 is an M8 target, not this M3 slice), got "
-            f"{len(data)}",
+            f"evals/questions.yaml must have at least the original 5 "
+            f"questions (the eventual 30 is an M8 target), got {len(data)}",
         )
 
     def test_every_question_has_a_nonblank_question_string(self):
@@ -100,7 +104,7 @@ class EvalQuestionsYamlTests(unittest.TestCase):
                 f"question #{i + 1}'s 'expected' mapping is empty: {case!r}",
             )
 
-    def test_all_five_questions_are_distinct(self):
+    def test_all_questions_are_distinct(self):
         data = self._load()
         question_texts = [str(case["question"]).strip() for case in data]
         self.assertEqual(
