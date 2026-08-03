@@ -15,10 +15,8 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
 - Seed: make seed                 (Olist CSVs → olist schema, RO user,
                                    catalog sync, glossary embeddings)
 - Test: python -m unittest discover tests
-        <!-- Real suite, real Voyage/Anthropic calls under rate limiting:
-             takes up to ~30 min (grew again after the glossary-retrieval
-             slice doubled generate_sql()'s Voyage calls). Not hung -- let
-             it run. -->
+        <!-- Real suite, real Voyage/Anthropic calls: ~5-10 min. Not hung --
+             let it run. -->
         <!-- switch to pytest AND update stop_verify.py when test deps land -->
 - Eval: python -m evals.run       (evals/questions.yaml — run after ANY
                                    prompt or pipeline change)
@@ -39,11 +37,6 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
 - All LLM JSON output goes through a Pydantic model with one retry —
   no scattered json.loads.
 - Secrets in .env (gitignored); .env.example stays current.
-- Any change adding a new Voyage/Anthropic API call site must budget for
-  rate-limit contention (retry attempts, subprocess/hook timeouts) in the
-  same slice — Voyage's free-tier 3 RPM cap has caused real test/build
-  failures in three consecutive slices (embed_text's retry, stop_verify's
-  timeout, and glossary retrieval's doubled per-question call volume).
 
 ## Where things live
 - Method: RUNBOOK.md · Compressed loop: WORKFLOW.md

@@ -21,23 +21,15 @@ CREATE TABLE IF NOT EXISTS app.catalog_embeddings (
 VOYAGE_MODEL = "voyage-3.5"
 EMBEDDING_DIMENSION = 1024
 
-# Voyage's free tier caps this project's account at 3 requests/minute.
-# voyageai's own client already retries a RateLimitError a few times
-# internally before giving up, so a further immediate retry on our end
-# would just repeat the same failure -- only a real wait for the rate
-# window to clear (~20s per allowed slot) gives a retry a chance to
-# succeed.
-#
-# 6 attempts, not 4: the glossary-retrieval slice
-# (plans/briefs/2026-08-03-glossary-retrieval.md) doubled
-# generate_sql()'s Voyage calls per question (schema + glossary
-# retrieval), and a real full-suite run this slice hit a genuine
-# RateLimitError exhaustion at 4 attempts (60s of backoff) during a
-# contended window -- 6 attempts (100s of backoff) gave real headroom to
-# outlast sustained contention across the many real-Voyage-call tests in
-# one run.
-RATE_LIMIT_MAX_ATTEMPTS = 6
-RATE_LIMIT_RETRY_DELAY_SECONDS = 20
+# A real external API call deserves a real failure path, not zero
+# retry -- but a 2026-08-03 retest (10 concurrent voyage-3.5 calls, all
+# 200 OK) found no evidence of the free-tier 3 RPM cap this was
+# originally tuned against, so this is deliberately modest: a couple of
+# quick retries for a genuine transient error, not padding for a rate
+# limit that doesn't reproduce. If RateLimitError starts recurring for
+# real, re-widen this.
+RATE_LIMIT_MAX_ATTEMPTS = 2
+RATE_LIMIT_RETRY_DELAY_SECONDS = 5
 
 
 def to_vector_literal(embedding):

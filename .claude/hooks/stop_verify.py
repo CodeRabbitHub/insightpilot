@@ -35,21 +35,22 @@ def main() -> int:
         return 0
 
     try:
-        # 2400s, not 1200s: the glossary-retrieval slice
-        # (plans/briefs/2026-08-03-glossary-retrieval.md) doubled
-        # generate_sql()'s Voyage embed calls (schema + glossary
-        # retrieval) and added its own ~16-chunk embed suite, pushing a
-        # real full-suite run to ~1730s honestly measured this slice --
-        # already past the previous 1200s ceiling. A shorter timeout
-        # doesn't just fail fast -- subprocess.run() kills the child on
-        # timeout, which can land mid-way through one of the integration
-        # tests that mutates a shared DB row and restores it in a
-        # `finally` (e.g. test_catalog_sync.py's preserve-description
-        # test): a hard kill skips that `finally`, permanently corrupting
-        # the row for every later test run until someone notices and
-        # repairs it by hand.
+        # 600s: real, fresh measurements (2026-08-03) show the full suite
+        # actually runs 200-250s solo, with no rate-limit contention (a
+        # 2026-08-03 retest found no evidence of the free-tier 3 RPM cap
+        # this timeout was previously padded for) -- 600s is ~2.5x that,
+        # not the much looser 1200s a first pass at reverting this landed
+        # on. A shorter timeout doesn't just fail fast -- subprocess.run()
+        # kills the child on timeout, which can land mid-way through one
+        # of the integration tests that mutates a shared DB row and
+        # restores it in a `finally` (e.g. test_catalog_sync.py's
+        # preserve-description test): a hard kill skips that `finally`,
+        # permanently corrupting the row for every later test run until
+        # someone notices and repairs it by hand. 600s keeps real margin
+        # over the measured runtime while still catching a genuine hang
+        # in ~10 minutes instead of ~20.
         result = subprocess.run(
-            TEST_CMD, capture_output=True, text=True, timeout=2400
+            TEST_CMD, capture_output=True, text=True, timeout=600
         )
     except Exception:
         return 0

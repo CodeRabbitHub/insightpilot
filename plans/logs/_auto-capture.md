@@ -814,3 +814,49 @@ Date:   Mon Aug 3 21:22:51 2026 +0530
  tests/test_repair_sql.py                    | 178 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  8 files changed, 961 insertions(+), 8 deletions(-)
 ```
+
+## Commit at 2026-08-03 23:15
+```
+commit 0704ab4d126e2e52c35d056ea271d198e8485524
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 23:15:56 2026 +0530
+
+    Capture: repair-loop slice log
+    
+    Slice log for the repair-loop slice (commit ba76f79): the plan approved
+    at Gate 1, the diff accepted, done-check output, the mid-gate correction
+    (rejected the documented-exception approach for the untested
+    second-failure-propagation path and required a real deterministic test),
+    and the next smallest slice (the Stop-hook/shared-DB-row concurrency
+    hazard, now recurring for a third consecutive session).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-03-repair-loop.md | 95 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md          | 71 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 166 insertions(+)
+```
+
+## Commit at 2026-08-03 23:16
+```
+commit 280f7c6e355a16e504faece453e605743bf1a285
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 23:16:06 2026 +0530
+
+    Handoff: repair-loop slice done, next brief is the concurrency hazard fix
+    
+    HANDOFF.md rewritten with this session's verified state (one-shot repair
+    loop live, M3 fully closed, the second-failure-propagation gap actually
+    fixed via _retry_once() rather than left as a documented exception) and
+    the next brief: fix the Stop-hook/shared-DB-row concurrency hazard
+    (test_verify_describe_script.py and test_glossary_verify_embed.py's
+    matching real-committed-mutation races), root-caused precisely this
+    session and now recurring for a third consecutive session.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md | 310 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------------------------------
+ 1 file changed, 160 insertions(+), 150 deletions(-)
+```

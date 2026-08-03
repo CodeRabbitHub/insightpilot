@@ -16,15 +16,12 @@ import sys
 
 from _pg_helpers import REPO_ROOT
 
-# generate_sql() now makes two Voyage embed calls per invocation (schema
-# + glossary retrieval, since the glossary-retrieval slice:
-# plans/briefs/2026-08-03-glossary-retrieval.md), each subject to
-# embed_text()'s up-to-6-attempt/20s-backoff retry under Voyage's 3 RPM
-# free-tier cap (100s worst case, per call) -- 120s was already tight
-# before either change and proved too tight after, so this mirrors
-# stop_verify.py's own real-runtime-driven timeout bump from the prior
-# slice.
-VERIFY_GENERATE_SQL_TIMEOUT_SECONDS = 450
+# generate_sql() makes two real Voyage embed calls per invocation (schema
+# + glossary retrieval) plus one real Anthropic call -- a 2026-08-03
+# retest found no evidence of the free-tier 3 RPM cap this timeout was
+# previously padded for, so it's back to a value that matches real
+# observed single-invocation latency with margin.
+VERIFY_GENERATE_SQL_TIMEOUT_SECONDS = 120
 
 
 def run_verify_generate_sql():
