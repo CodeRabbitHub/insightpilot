@@ -15,6 +15,8 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
 - Seed: make seed                 (Olist CSVs → olist schema, RO user,
                                    catalog sync, glossary embeddings)
 - Test: python -m unittest discover tests
+        <!-- Real suite, real Voyage/Anthropic calls under rate limiting:
+             takes up to ~15 min. Not hung -- let it run. -->
         <!-- switch to pytest AND update stop_verify.py when test deps land -->
 - Eval: python -m evals.run       (evals/questions.yaml — run after ANY
                                    prompt or pipeline change)
