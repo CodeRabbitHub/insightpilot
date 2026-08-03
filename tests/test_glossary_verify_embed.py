@@ -16,20 +16,43 @@ honestly until app/glossary/verify_embed.py exists.
 import unittest
 
 from _glossary_helpers import run_glossary_embed, run_glossary_verify_embed
-from _pg_helpers import get_admin_connection
+from _pg_helpers import (
+    acquire_advisory_lock,
+    get_admin_connection,
+    release_advisory_lock,
+)
+
+_MISSING_KB_CHUNK_LOCK_KEY = "insightpilot-test-verify-embed-missing-kb-chunk"
 
 
 class GlossaryVerifyEmbedDoneCheckTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.embed_result = run_glossary_embed()
         cls.conn = get_admin_connection()
+        # addClassCleanup, not tearDownClass: unittest skips tearDownClass
+        # entirely if setUpClass raises, which would leak both the open
+        # connection and, worse, the advisory lock below for the rest of
+        # this process's lifetime (it's session-scoped, released only by
+        # an explicit unlock or the session ending) -- exactly the stall
+        # this fix exists to prevent. Cleanups still run on a setUpClass
+        # failure, and in reverse (LIFO) order, so the lock (added second)
+        # releases before the connection (added first) closes.
+        cls.addClassCleanup(cls.conn.close)
         cls.conn.autocommit = True
-
-    @classmethod
-    def tearDownClass(cls):
-        if getattr(cls, "conn", None) is not None:
-            cls.conn.close()
+        # Acquired before run_glossary_embed() below, not after: embed()
+        # re-embeds (and inserts over) any source it finds missing from
+        # app.kb_chunks, so if this ran unlocked, a concurrent process's
+        # racy test holding the lock mid-deletion could have its missing
+        # row silently restored by this process's own setup before that
+        # process ever gets to check it. Held for this class's entire run,
+        # not just the mutating test below, for the same reason: the other
+        # two tests here assert a fully-embedded glossary, which that test
+        # transiently violates.
+        acquire_advisory_lock(cls.conn, _MISSING_KB_CHUNK_LOCK_KEY)
+        cls.addClassCleanup(
+            release_advisory_lock, cls.conn, _MISSING_KB_CHUNK_LOCK_KEY
+        )
+        cls.embed_result = run_glossary_embed()
 
     def _require_embedded_glossary(self):
         if self.embed_result.returncode != 0:

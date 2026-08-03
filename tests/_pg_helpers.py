@@ -80,6 +80,30 @@ def get_ro_connection():
     return psycopg2.connect(**ro_conn_params())
 
 
+def acquire_advisory_lock(conn, key_text):
+    """Session-scoped Postgres advisory lock, keyed by hashtext(key_text).
+
+    Session-scoped (not pg_advisory_xact_lock) because callers run with
+    conn.autocommit = True -- an xact-scoped lock would release after the
+    very next statement, before a subprocess check in between could run.
+    A session lock blocks a second connection (even from a different OS
+    process) requesting the same key until this one releases. Callers take
+    this once in setUpClass and release via addClassCleanup (not
+    tearDownClass, which unittest skips entirely if setUpClass raises,
+    leaking a session-scoped lock for the rest of the process's lifetime),
+    so two concurrent invocations of the same test class fully serialize
+    instead of one process's mutation window overlapping the other's
+    read-only checks.
+    """
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_lock(hashtext(%s))", (key_text,))
+
+
+def release_advisory_lock(conn, key_text):
+    with conn.cursor() as cur:
+        cur.execute("SELECT pg_advisory_unlock(hashtext(%s))", (key_text,))
+
+
 def all_csv_files():
     files = sorted(DATA_DIR.glob("*.csv"))
     return files

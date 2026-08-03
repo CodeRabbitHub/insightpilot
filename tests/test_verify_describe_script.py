@@ -17,21 +17,46 @@ import unittest
 
 from _catalog_helpers import run_sync
 from _describe_helpers import run_describe, run_verify_describe
-from _pg_helpers import get_admin_connection
+from _pg_helpers import (
+    acquire_advisory_lock,
+    get_admin_connection,
+    release_advisory_lock,
+)
+
+_MISSING_DESCRIPTION_LOCK_KEY = (
+    "insightpilot-test-verify-describe-missing-description"
+)
 
 
 class VerifyDescribeDoneCheckTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.conn = get_admin_connection()
+        # addClassCleanup, not tearDownClass: unittest skips tearDownClass
+        # entirely if setUpClass raises, which would leak both the open
+        # connection and, worse, the advisory lock below for the rest of
+        # this process's lifetime (it's session-scoped, released only by
+        # an explicit unlock or the session ending) -- exactly the stall
+        # this fix exists to prevent. Cleanups still run on a setUpClass
+        # failure, and in reverse (LIFO) order, so the lock (added second)
+        # releases before the connection (added first) closes.
+        cls.addClassCleanup(cls.conn.close)
+        cls.conn.autocommit = True
+        # Acquired before run_sync()/run_describe() below, not after:
+        # describe() re-describes (and commits over) any row it finds
+        # NULL, so if this ran unlocked, a concurrent process's racy test
+        # holding the lock mid-mutation could have its NULL silently
+        # undone by this process's own setup before that process ever
+        # gets to check it. Held for this class's entire run, not just the
+        # mutating test below, for the same reason: the other two tests
+        # here assert a fully-described catalog, which that test
+        # transiently violates.
+        acquire_advisory_lock(cls.conn, _MISSING_DESCRIPTION_LOCK_KEY)
+        cls.addClassCleanup(
+            release_advisory_lock, cls.conn, _MISSING_DESCRIPTION_LOCK_KEY
+        )
         cls.sync_result = run_sync()
         cls.describe_result = run_describe()
-        cls.conn = get_admin_connection()
-        cls.conn.autocommit = True
-
-    @classmethod
-    def tearDownClass(cls):
-        if getattr(cls, "conn", None) is not None:
-            cls.conn.close()
 
     def _require_described_catalog(self):
         if self.sync_result.returncode != 0:
