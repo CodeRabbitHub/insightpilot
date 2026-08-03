@@ -1,188 +1,191 @@
 # Handoff
 
 Date: 2026-08-03
-Slice just completed: plans/briefs/2026-08-02-eval-harness-v1.md +
-  plans/logs/2026-08-03-eval-harness-v1.md (commit cd1edf0, plus a
-  follow-up ratchet commit 3e92b00 to CLAUDE.md)
+Slice just completed: plans/briefs/2026-08-03-glossary-retrieval.md +
+  plans/logs/2026-08-03-glossary-retrieval.md (commits a000513, dd3c561,
+  e80546e)
 
 ## State of the work
-- **The project has its first automated accuracy number.** `evals/run.py`
-  loads `evals/questions.yaml` (5 curated questions, each hand-verified
-  live against the real `olist` DB this session), runs each through the
-  real `answer.get_answer(question)` pipeline, grades pass/fail via
-  `check_expected()` (two assertion kinds: `top_row` — membership check
-  against the first result row's values, column-order/name agnostic;
-  `scalar` — single-value match with an optional `tolerance`), and prints
-  a per-question PASS/FAIL line plus an "N/5 correct" summary. Current
-  real score: 5/5.
-- `app/pipeline/generate_sql.py`'s `generate_sql()` and
-  `app/pipeline/answer.py`'s `get_answer()` both gained an optional
-  `question` parameter (default `FIXED_QUESTION`) — every existing
-  zero-arg CLI/verify script call site is unchanged and still passes.
-- `requirements.txt` gained `PyYAML==6.0.3` (pinned, confirmed at Gate 1).
-- `evals/__init__.py` (empty) + `evals/questions.yaml` (a top-level YAML
-  list — not a `{questions: [...]}` wrapper — of 5
-  `{question, expected}` mappings) + `evals/run.py` (`load_questions`,
-  `check_expected`, `format_summary`, `main`) are new. This exact shape
-  came from the test-writer subagent (blind to my own Gate-1 plan, which
-  had proposed a wrapper dict and a different function contract) — the
-  tests were treated as the real spec once written, and the
-  implementation was built to match them.
-- New tests: `tests/test_eval_questions_yaml.py` (structural checks on
-  the yaml), `tests/test_eval_run_grading.py` (pure, no-network unit
-  tests for `check_expected`/`load_questions`/`format_summary` against
-  synthetic fixtures — the brief's "known-good and known-bad fixture
-  case" requirement), `tests/test_eval_run_cli.py` +
-  `tests/_eval_helpers.py` (the literal done-check, real/billed),
-  `tests/test_question_parameter.py` (pure signature checks plus two
-  real end-to-end classes proving the `question` param is genuine
-  plumbing, not silently ignored). `tests/test_llm_description_setup.py`
-  extended for the `pyyaml` dependency allowlist + a version-pin check.
-- **A real, previously-undiagnosed bug in `.claude/hooks/stop_verify.py`
-  was found and fixed this session**: its subprocess timeout was 300s,
-  but the real suite now takes ~650-900s (real Voyage/Anthropic calls,
-  Voyage's free-tier 3 RPM limit). The old timeout was silently killing
-  the suite mid-run on every agent turn; a hard kill can skip a test's
-  `finally` cleanup, and two *pre-existing, unrelated* tests
-  (`test_catalog_sync.py`'s `test_sync_preserves_an_existing_description_across_a_resync`,
-  `test_verify_describe_script.py`'s `test_verify_describe_fails_when_a_description_is_missing`)
-  mutate-then-restore a shared `app.catalog_tables.customers.description`
-  row as part of their own checks, so a kill mid-flight permanently
-  corrupts it until someone notices and repairs it by hand (which
-  happened, repeatedly, this session — always fixed via
-  `UPDATE ... SET description = NULL` + `python -m app.catalog.describe`
-  to regenerate a real one). Timeout bumped to 1200s (commit `cd1edf0`);
-  CLAUDE.md's `Test:` line now documents the real ~15min runtime (commit
-  `3e92b00`), a second-repetition ratchet promotion (Voyage rate limits
-  have now caused friction in two consecutive slices).
-- `evals/generate_sql.md`/`evals/table_description.md` were NOT extended
-  this slice — this slice's own `evals/questions.yaml` + `evals/run.py`
-  *is* the eval artifact; no prompt or retrieval logic changed, only
-  which question flows through the existing pipeline.
+- **`generate_sql()` now retrieves business-glossary context alongside
+  schema context, via pgvector, for every question.** `glossary.md` (16
+  KPI definitions: Revenue, AOV, Repeat Purchase Rate, Average Delivery
+  Time, On-Time Delivery Rate, Average Review Score, Low Review Rate,
+  Churn Proxy, Freight Ratio, Average Items per Order, Order Cancellation
+  Rate, Order Approval Time, Average Payment Installments, Active Seller
+  Count, Top Product Category, Payment Type Mix) is embedded into a new
+  `app.kb_chunks(id, source, content, embedding vector(1024))` table by a
+  new `app/glossary/` package (`embed.py` + `verify_embed.py`), mirroring
+  `app/catalog/embed.py`'s exact convention — same Voyage client,
+  `embed_text`/`to_vector_literal`/`VOYAGE_MODEL`/`EMBEDDING_DIMENSION`
+  imported, not reimplemented. `generate_sql.py` gained
+  `retrieve_relevant_glossary_entries(cur, voyage_client, question,
+  k=GLOSSARY_RETRIEVAL_K=3)` and `build_glossary_context()`, called
+  alongside the existing `retrieve_relevant_tables()`/
+  `build_schema_context()` inside `generate_sql()`. `prompts/generate_sql.md`
+  gained a real `$glossary_context` templated section.
+- **A real regression was caught and fixed by running the eval fresh,
+  not by trusting the code looked right.** The first draft of
+  `glossary.md`'s "Top Product Category" and "Repeat Purchase Rate"
+  entries were too prescriptive and leaked into unrelated questions
+  (steering the LLM toward `COUNT(*)` + translated category names, and
+  toward always grouping by `customer_unique_id` even for a plain
+  "count customers by state" question) — dropped the eval from 5/5 to
+  3/5. Rewrote both entries to explicitly scope their guidance, deleted
+  and re-embedded the two affected `app.kb_chunks` rows, reconfirmed 5/5
+  twice. Full detail: `artifacts/reviews/2026-08-03-glossary-retrieval.md`.
+- **The eval set grew to 6 questions.** Added "What is the average order
+  value?" (`expected.scalar: 137.7541, tolerance: 0.01`, hand-verified
+  live) specifically because none of the original 5 questions directly
+  exercises glossary-informed KPI computation — they only caught the
+  regression above by accident. Two tests that had hardcoded "exactly
+  5"/"N/5" assumptions (`tests/test_eval_questions_yaml.py`,
+  `tests/test_eval_run_cli.py`) were loosened to "at least 5"/"N/M",
+  since the eval set's own documented lifecycle
+  (`templates/eval.md`: "start with 5; every production/demo failure
+  adds a case") always intended growth past 5.
+- **Voyage's free-tier 3 RPM rate limit caused a real failure for the
+  3rd consecutive slice**, now promoted from a per-slice comment to a
+  CLAUDE.md standing rule: any future change adding a new Voyage/
+  Anthropic call site must budget for rate-limit contention in the same
+  slice. Concretely this slice: `RATE_LIMIT_MAX_ATTEMPTS` 4→6
+  (`app/catalog/embed.py`, shared/reused by `app/glossary/embed.py`);
+  `stop_verify.py`'s subprocess timeout 1200s→2400s;
+  `tests/_answer_helpers.py`'s/`tests/_generate_sql_helpers.py`'s own
+  subprocess timeouts 120s→450s; CLAUDE.md's documented real test
+  runtime ~15min→~30min. Root cause: `generate_sql()` now makes two
+  independent Voyage embed calls per question (schema + glossary), a
+  known, accepted, in-code-documented tradeoff — the brief kept
+  `retrieve_relevant_tables()`'s own signature out of scope, so the two
+  calls can't share one embedding.
+- Both done-checks pass fresh, most recent run:
+  ```
+  $ python -m evals.run
+  [PASS] What are the top 5 product categories by number of orders?
+  [PASS] Which payment type is used the most, by number of payments?
+  [PASS] Which customer state has the most customers?
+  [PASS] How many orders have the status 'delivered'?
+  [PASS] What is the average review score across all reviews?
+  [PASS] What is the average order value?
+  6/6 correct
+  ```
+  ```
+  $ python -m unittest discover tests
+  Ran 172 tests in 219.629s
+
+  OK
+  ```
+- Real, live shipping proof beyond the curated eval questions: asking
+  "What is the average order value?" retrieved the `average-order-value-aov`
+  glossary entry as the top hit and generated
+  `SELECT SUM(price) / COUNT(DISTINCT order_id) AS average_order_value
+  FROM olist.order_items`, which executed to a real `137.7540763788944520`
+  — matching the KPI's own formula exactly.
 
 ## Proof
-```
-$ python -m evals.run
-[PASS] What are the top 5 product categories by number of orders?
-[PASS] Which payment type is used the most, by number of payments?
-[PASS] Which customer state has the most customers?
-[PASS] How many orders have the status 'delivered'?
-[PASS] What is the average review score across all reviews?
-5/5 correct
-
-$ python -m unittest discover tests
-.............................................................................................................................................
-----------------------------------------------------------------------
-Ran 139 tests in 651.003s
-
-OK
-```
+See the two command blocks above (`evals.run`, `unittest discover tests`).
+Both were run fresh, standalone, this session, on the final committed
+state.
 
 ## Open questions / known issues
-- **A deeper, systemic concurrency hazard remains, unfixed.** Even after
-  the stop_verify.py timeout fix, a full-suite run can still hit the same
-  `customers`-description corruption if two full-suite invocations
-  genuinely overlap in time (confirmed directly this session: a second
-  fresh attempt during this slice's own gate hit the identical symptom
-  with zero code changes in between). The Stop hook fires automatically
-  on every agent turn boundary, so a long-running manual
-  `python -m unittest discover tests` (this session's real runtime:
-  ~650-900s) can overlap with one or more hook-triggered runs, and the
-  two genuinely race on the same DB row via ordinary concurrent-access
-  semantics (not just kills). Root cause is now well understood
-  (two pre-existing tests do a non-atomic "capture original, mutate,
-  verify, restore" against `ORDER BY table_name LIMIT 1`, i.e. always
-  `customers`, with no locking), but a real fix (e.g. a stop_verify lock
-  file so overlapping invocations can't run concurrently, or making
-  those two tests target an isolated row/table instead of a shared one)
-  was explicitly deferred as out-of-scope for this slice, by direct user
-  decision. **If a future session sees `customers`'s description show up
-  as `'a hand-set description for this test'` or fail a
-  word-count/idempotency check, this is why** — repair via
-  `UPDATE app.catalog_tables SET description = NULL WHERE table_name =
-  'customers'` then `python -m app.catalog.describe`, not by touching
-  test logic.
-- **Voyage's free-tier 3 RPM rate limit continues to be a real,
-  recurring cost** (now flagged twice — see CLAUDE.md's `Test:` line).
-  Any future slice adding more Voyage calls (e.g. the glossary retrieval
-  slice below) will add to the real suite's already-long runtime.
+- **The pre-existing Stop-hook/shared-mutable-DB-row concurrency hazard
+  (first documented in the eval-harness-v1 handoff) is still unresolved
+  and still out of scope.** It recurred repeatedly this session: 5 of 7
+  full-suite attempts failed on it, in three different shapes — the
+  known `customers`-description race, a *new* instance of the same
+  pattern on `app.kb_chunks` (`tests/test_glossary_verify_embed.py`'s own
+  mutate-restore-in-`finally` test hit a `UniqueViolation` when a
+  concurrent run's restore raced it), and a genuine Postgres deadlock in
+  `test_seed_idempotency.py` (an M1-era test with zero connection to this
+  slice's code) that is direct proof two full-suite invocations
+  genuinely overlapped in time. If a future session sees a similar
+  mutate-restore test fail with a `UniqueViolation`/duplicate-key error,
+  or `customers`'s description show up as a stub, this is why — repair
+  the specific row (`UPDATE ... SET description = NULL` +
+  `python -m app.catalog.describe` for `customers`; re-run
+  `python -m app.glossary.embed` after deleting the affected
+  `app.kb_chunks` row(s) if one goes missing) rather than touching test
+  logic. A real fix (a stop_verify lock file, or giving the shared-row
+  tests their own isolated row) remains a dedicated slice of its own —
+  now overdue given it has cost real time in two consecutive sessions.
+- The doubled-Voyage-call-per-question design cost (schema + glossary
+  each independently embed the same question text) remains unoptimized
+  — accepted, documented in code (`app/pipeline/generate_sql.py`'s
+  `generate_sql()`), not a blocker.
 - Lint/type tooling (`ruff`, `mypy`) and the test runner (`unittest`, not
   `pytest`) remain unaddressed, carried over from every prior slice —
   still not blocking.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-For the fixed question (and, by extension, every `evals/questions.yaml`
-question), `generate_sql()`'s prompt context includes top-k relevant
-business-glossary entries (KPI definitions) alongside the existing top-k
-schema context, retrieved via the same pgvector pattern already built
-for schema retrieval.
+When generated SQL fails `validate_sql()` or the real DB execute in
+`get_answer()`, automatically retry exactly once via a new `repair_sql()`
+call (the original question + the failed SQL + the real error fed to the
+LLM) before giving up — per PRD F2's "one automatic repair loop, max 2
+attempts total" and F9's `repair_sql.md` prompt. This closes out M3
+(retrieval + repair + evals) entirely.
 
 Constraints:
-New file `glossary.md` at the repo root, seeded with ~15 KPI definitions
-per PRD.md F5 (Revenue, AOV, Repeat purchase rate, Delivery time, Review
-score, Churn proxy, etc.), each with an exact formula referencing real
-`olist` columns — hand-written/verified against the real schema, not
-invented loosely. Reuse the exact same Voyage AI embeddings provider,
-`voyage-3.5` model, and `embed_text()`'s existing rate-limit
-retry-with-backoff (`app/catalog/embed.py`) — no new provider, no
-reinvented retry logic. New `app`-schema table for glossary chunk
-embeddings (one row per KPI definition; exact name proposed at Gate 1 —
-`app.kb_chunks` was explicitly reserved as out-of-scope-to-create by the
-llm-table-descriptions slice's own tests, strongly implying it's the
-intended name here). New idempotent embed script mirroring
-`app/catalog/embed.py`'s exact convention (skip already-embedded
-entries, commit per-row, its own `verify_*` CLI). `generate_sql.py` gains
-a `retrieve_relevant_glossary_entries(cur, voyage_client, question, k=...)`
-analogous to the existing `retrieve_relevant_tables()`, called with the
-same `question` parameter now threaded through `generate_sql()`.
-`prompts/generate_sql.md` gains a glossary-context placeholder (a real
-templated section, not a hardcoded string). Per CLAUDE.md's binding
-rule, a prompt change without an eval run is not done — `evals/run.py`
-must be re-run after this change and its score reported, even if
-unchanged from 5/5. No new dependencies expected (reuses `voyageai`,
-already pinned).
+New `prompts/repair_sql.md`, `string.Template`-based like
+`prompts/generate_sql.md` (placeholders for the question, the failed SQL,
+and the real error text). New `repair_sql()` function (exact module
+location — `app/pipeline/generate_sql.py` alongside `call_llm_for_sql()`,
+or a new `app/pipeline/repair_sql.py` — proposed and confirmed at Gate 1)
+reusing the existing `GenerateSqlResponse` Pydantic model (repair also
+produces a single `{"sql": ...}` SELECT) and the existing Anthropic
+client/`require_env` pattern — no new provider, no new response schema.
+`get_answer()` in `app/pipeline/answer.py` gains the retry orchestration:
+on `SqlValidationError` from `validate_sql()` or a real exception from
+`execute_sql()`, call `repair_sql()` once with the concrete error
+message, re-validate and re-execute the repaired SQL; if that also
+fails, propagate the second failure — exactly one repair attempt, never
+a loop-until-success. Must not change `retrieve_relevant_tables()`/
+`retrieve_relevant_glossary_entries()`/`build_schema_context()`/
+`build_glossary_context()`/`generate_sql()`'s own generation behavior,
+and must not change `validate_sql.py`'s/`execute_sql.py`'s validation or
+execution rules themselves — this slice only wires a retry around them.
 
 Inputs:
-PRD.md's F5 section (glossary spec: ~15 KPIs, chunked per definition,
-embedded into pgvector, retrieved alongside schema context); ARCHITECT.md
-(Voyage AI + pgvector decisions); `app/catalog/embed.py` (the exact
-pattern to mirror: `SCHEMA_DDL`, `to_vector_literal`, `embed_text`,
-idempotent `embed()`); `app/pipeline/generate_sql.py`'s
-`retrieve_relevant_tables()`/`build_schema_context()`/`build_prompt()`/
-`generate_sql()`; `prompts/generate_sql.md`; `evals/questions.yaml` +
-`evals/run.py` (this slice's own eval harness, used to prove glossary
-retrieval doesn't regress accuracy).
+PRD.md F2 (pipeline step 4: "Validate — see F3. On failure, one automatic
+repair loop, max 2 attempts total"), F3 (validation rules), F9/section 9
+(`repair_sql.md`: "failed SQL + DB error → corrected SELECT");
+`app/pipeline/generate_sql.py` (`GenerateSqlResponse`, `call_llm_for_sql()`
+pattern, `PROMPT_TEMPLATE` convention, `MAX_RETRIES` shape to mirror at
+the repair-attempt-count level); `app/pipeline/validate_sql.py`
+(`SqlValidationError`); `app/pipeline/execute_sql.py`; `app/pipeline/answer.py`
+(`get_answer()`, the exact orchestration point to modify);
+`evals/questions.yaml` + `evals/run.py` (prove no regression from the
+current 6/6).
 
 Outputs:
-- `glossary.md` — ~15 KPI definitions with real `olist` column
-  references.
-- New DDL (`app.kb_chunks` or the name confirmed at Gate 1): one
-  embedding vector + chunk text per glossary entry.
-- A new idempotent embed script + its own `verify_*` CLI, mirroring
-  `app/catalog/embed.py`'s convention exactly.
-- `generate_sql.py` gains `retrieve_relevant_glossary_entries()` +
-  glossary-context building, called alongside the existing schema
-  retrieval inside `generate_sql()`, using the same `question`.
-- `prompts/generate_sql.md` extended with a real glossary-context
-  section.
-- Tests: glossary retrieval returns a genuine top-k subset (never a
-  hardcoded full-list check, mirroring the schema-retrieval slice's own
-  test precedent); the new embed script is idempotent across two runs.
-- `evals/run.py`'s score re-reported after the prompt change (still 5/5,
-  or an honestly lower/different number with an explanation).
+- `prompts/repair_sql.md`.
+- A new `repair_sql()` function (module confirmed at Gate 1).
+- `get_answer()` gains the one-shot repair-on-failure orchestration
+  described above.
+- Tests: a real, hand-crafted-invalid-SQL + real-error integration test
+  proving `repair_sql()` alone returns a different, validation-passing
+  SELECT (no mocking, per this project's real-infra convention) —
+  mirroring how `validate_sql.py`'s own tests construct real bad SQL
+  rather than mocking sqlglot; an integration test proving `get_answer()`
+  actually invokes the repair path and succeeds when the *first*
+  `generate_sql()` result would fail (this will need a concrete way to
+  force a real, first-attempt failure without mocking — worth discussing
+  explicitly at Gate 1, since `generate_sql()` with retrieval usually
+  produces valid SQL); `evals/run.py`'s score re-reported (still 6/6, or
+  an honestly different number with an explanation).
 
 Done-check:
-`python -m evals.run` exits 0 and reports its score after the glossary
-context is added — paste output, and confirm it's not a regression from
-this slice's 5/5. Separately, `python -m unittest discover tests` passes
-in full — paste output (expect ~15-20 min real runtime; not hung, see
-CLAUDE.md).
+A dedicated repair-path test demonstrates the loop actually fires and
+self-corrects on a real, deliberately invalid SQL + real
+validation/DB error — paste output. Separately, `python -m evals.run`
+exits 0 and reports its score (no regression from 6/6) — paste output.
+Separately, `python -m unittest discover tests` passes in full — paste
+output (expect ~20-30 min real runtime per CLAUDE.md; not hung).
 
 Out-of-scope:
-Document upload/parsing UI (F5 explicitly excludes this — glossary is
-seeded, not uploaded); the one-shot repair loop (a separate remaining M3
-slice); changing `retrieve_relevant_tables()`/schema retrieval's own
-behavior; `validate_sql.py`/`execute_sql.py` internals; FastAPI/frontend;
-CI; fixing the deeper stop_verify.py/shared-DB-test concurrency hazard
-noted above (a real, separate, dedicated slice of its own).
+Changing `generate_sql()`'s/retrieval's own behavior; changing
+`validate_sql.py`'s/`execute_sql.py`'s validation/execution rules
+themselves (only wiring a retry around them); more than one repair
+attempt (no loop-until-success, per PRD's explicit "max 2 attempts
+total"); FastAPI/frontend (M4/M5); CI; fixing the Stop-hook/shared-DB-row
+concurrency hazard noted above (still a real, separate, dedicated slice
+of its own — now overdue).
