@@ -558,3 +558,30 @@ Date:   Sun Aug 2 22:40:14 2026 +0530
  tests/test_verify_embed_script.py                         | 126 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  13 files changed, 953 insertions(+), 26 deletions(-)
 ```
+
+## Commit at 2026-08-02 23:35
+```
+commit 8ec527184ada2be5d9d9bd585f4c613fa7066bca
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sun Aug 2 23:35:08 2026 +0530
+
+    Capture + handoff: pgvector-schema-retrieval slice done, next brief is eval harness v1
+    
+    Slice log for the pgvector retrieval slice (commit 92c76d9), evals/generate_sql.md
+    extended with a second case proving retrieval didn't regress SQL quality
+    for the fixed question, and HANDOFF.md rewritten with this session's
+    verified state plus the next brief: a 5-question eval harness
+    (evals/questions.yaml + python -m evals.run) running the real pipeline,
+    which requires generate_sql()/get_answer() to gain an optional question
+    parameter (default FIXED_QUESTION, zero behavior change to existing
+    CLI/verify scripts).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ HANDOFF.md                                         | 298 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------
+ evals/generate_sql.md                              |  37 ++++++++++++++-----
+ plans/logs/2026-08-02-pgvector-schema-retrieval.md |  75 ++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                        |  68 +++++++++++++++++++++++++++++++++++
+ 4 files changed, 336 insertions(+), 142 deletions(-)
+```

@@ -42,6 +42,12 @@ NEWLY_APPROVED_PACKAGES |= {"asyncpg"}
 # amended embeddings-provider decision names Voyage AI), added by a later
 # slice than the one this test file's docstring describes.
 NEWLY_APPROVED_PACKAGES |= {"voyageai"}
+# Extended by plans/briefs/2026-08-02-eval-harness-v1.md: PyYAML is a
+# fifth, separately pre-approved dependency (that brief's own Constraints
+# name it explicitly, needed to parse evals/questions.yaml) -- already
+# pulled in transitively by voyageai, but the brief requires it pinned
+# explicitly in requirements.txt like every other dependency here.
+NEWLY_APPROVED_PACKAGES |= {"pyyaml"}
 
 
 def _package_names(text):
@@ -77,6 +83,20 @@ class RequirementsTests(unittest.TestCase):
             set(),
             "requirements.txt gained dependencies beyond the two "
             f"pre-approved for this slice (anthropic, pydantic): {unexpected}",
+        )
+
+    def test_pyyaml_is_pinned_to_an_exact_version(self):
+        # Per the eval-harness-v1 brief's Constraints: "every other
+        # dependency in requirements.txt is pinned explicitly (confirm the
+        # exact version pin at Gate 1)" -- PyYAML must follow the same
+        # `package==version` convention as anthropic/pydantic/sqlglot/
+        # asyncpg/voyageai above, not a bare unpinned line.
+        text = REQUIREMENTS_FILE.read_text(encoding="utf-8")
+        self.assertRegex(
+            text,
+            re.compile(r"^pyyaml==\S+$", re.IGNORECASE | re.MULTILINE),
+            "requirements.txt must pin PyYAML to an exact version with "
+            f"'==', matching every other dependency in the file:\n{text}",
         )
 
 

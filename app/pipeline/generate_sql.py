@@ -103,7 +103,7 @@ def call_llm_for_sql(client, model, question, schema_context):
     )
 
 
-def generate_sql():
+def generate_sql(question=FIXED_QUESTION):
     api_key = require_env("ANTHROPIC_API_KEY")
     model = os.environ.get("ANTHROPIC_MODEL", DEFAULT_MODEL)
     client = Anthropic(api_key=api_key)
@@ -112,12 +112,12 @@ def generate_sql():
     conn = connect()
     try:
         with conn.cursor() as cur:
-            tables = retrieve_relevant_tables(cur, voyage_client, FIXED_QUESTION)
+            tables = retrieve_relevant_tables(cur, voyage_client, question)
             schema_context = build_schema_context(cur, tables)
     finally:
         conn.close()
 
-    return call_llm_for_sql(client, model, FIXED_QUESTION, schema_context)
+    return call_llm_for_sql(client, model, question, schema_context)
 
 
 def main():

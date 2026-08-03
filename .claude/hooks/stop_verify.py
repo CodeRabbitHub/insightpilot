@@ -35,8 +35,18 @@ def main() -> int:
         return 0
 
     try:
+        # 1200s, not 300s: the real suite now makes ~15+ real, sequential
+        # Voyage/Anthropic API calls (evals/run.py alone makes 5), which
+        # under Voyage's free-tier 3 RPM limit and its retry-with-backoff
+        # can take 800-900s honestly. A shorter timeout doesn't just fail
+        # fast -- subprocess.run() kills the child on timeout, which can
+        # land mid-way through one of the integration tests that mutates
+        # a shared DB row and restores it in a `finally` (e.g.
+        # test_catalog_sync.py's preserve-description test): a hard kill
+        # skips that `finally`, permanently corrupting the row for every
+        # later test run until someone notices and repairs it by hand.
         result = subprocess.run(
-            TEST_CMD, capture_output=True, text=True, timeout=300
+            TEST_CMD, capture_output=True, text=True, timeout=1200
         )
     except Exception:
         return 0

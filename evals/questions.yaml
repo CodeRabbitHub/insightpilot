@@ -1,0 +1,34 @@
+# 5 curated questions for the eval harness (plans/briefs/2026-08-02-eval-harness-v1.md).
+# Every `expected` value below was hand-verified against the real `olist`
+# database on 2026-08-03 (queries run and their output captured in this
+# slice's log at plans/logs/, written at the /capture step). Grading is
+# exact-match/code-assertion only, per
+# evals/run.py's check_expected() -- no LLM-as-judge.
+#
+# expected.top_row: the first result row's values must contain all of
+# these (order/column-name agnostic, since the LLM may alias columns
+# differently run to run).
+# expected.scalar: a single-row, single-column result must equal this
+# value, within `tolerance` if given (only needed for the one inherently
+# non-integer case below).
+
+- question: "What are the top 5 product categories by number of orders?"
+  expected:
+    top_row: ["cama_mesa_banho", 9417]
+
+- question: "Which payment type is used the most, by number of payments?"
+  expected:
+    top_row: ["credit_card", 76795]
+
+- question: "Which customer state has the most customers?"
+  expected:
+    top_row: ["SP", 41746]
+
+- question: "How many orders have the status 'delivered'?"
+  expected:
+    scalar: 96478
+
+- question: "What is the average review score across all reviews?"
+  expected:
+    scalar: 4.0864
+    tolerance: 0.05

@@ -1,0 +1,88 @@
+"""
+The eval-harness-v1 brief's literal done-check
+(plans/briefs/2026-08-02-eval-harness-v1.md): `python -m evals.run` exits
+0 and prints a real accuracy score (e.g. "5/5 correct" or honestly
+fewer) for the 5 curated questions in `evals/questions.yaml`.
+
+Requires: docker compose db service running, the catalog already synced
+and described (prior slices), a working ANTHROPIC_API_KEY/VOYAGE_API_KEY
+in .env, and a real evals/questions.yaml with 5 hand-verified questions
+(this slice's own Outputs) -- it makes 5 real, sequential, billed calls
+to the Anthropic API (one per question, via generate_sql()) plus 5 real
+Voyage embedding calls and 5 real executes against the read-only asyncpg
+connection.
+
+This does not assert any particular accuracy score (the brief explicitly
+allows "or honestly fewer" than 5/5) -- only that the command exits 0 and
+reports a real, well-formed summary and per-question result lines, per
+the Outputs' "prints a per-question PASS/FAIL line and a final 'N/5
+correct' summary".
+
+Will fail honestly until evals/run.py and evals/questions.yaml both exist.
+"""
+import re
+import unittest
+
+from _catalog_helpers import run_sync
+from _describe_helpers import run_describe
+from _eval_helpers import run_evals
+
+
+class EvalRunDoneCheckTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.sync_result = run_sync()
+        cls.describe_result = run_describe()
+
+    def _require_described_catalog(self):
+        if self.sync_result.returncode != 0:
+            self.fail(
+                "python -m app.catalog.sync did not exit 0:\n"
+                f"stdout={self.sync_result.stdout}\nstderr={self.sync_result.stderr}"
+            )
+        if self.describe_result.returncode != 0:
+            self.fail(
+                "python -m app.catalog.describe did not exit 0, so "
+                "python -m evals.run cannot be exercised against a fully "
+                f"described catalog:\nstdout={self.describe_result.stdout}\n"
+                f"stderr={self.describe_result.stderr}"
+            )
+
+    def test_evals_run_exits_zero(self):
+        self._require_described_catalog()
+
+        result = run_evals()
+        self.assertEqual(
+            result.returncode,
+            0,
+            "python -m evals.run did not exit 0 (the brief's done-check):\n"
+            f"stdout={result.stdout}\nstderr={result.stderr}",
+        )
+
+    def test_evals_run_stdout_reports_an_n_out_of_5_correct_summary(self):
+        self._require_described_catalog()
+
+        result = run_evals()
+        self.assertRegex(
+            result.stdout,
+            re.compile(r"\d+/5 correct", re.IGNORECASE),
+            "expected an 'N/5 correct' style summary line in stdout "
+            f"(the brief allows any real score, not necessarily 5/5):\n"
+            f"stdout={result.stdout}",
+        )
+
+    def test_evals_run_stdout_reports_a_pass_or_fail_line_per_question(self):
+        self._require_described_catalog()
+
+        result = run_evals()
+        pass_or_fail_marks = len(re.findall(r"PASS|FAIL", result.stdout, re.IGNORECASE))
+        self.assertGreaterEqual(
+            pass_or_fail_marks,
+            5,
+            "expected at least 5 PASS/FAIL markers in stdout, one per "
+            f"curated question:\nstdout={result.stdout}",
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
