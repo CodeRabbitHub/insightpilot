@@ -743,3 +743,74 @@ Date:   Mon Aug 3 19:22:54 2026 +0530
  tests/test_eval_run_cli.py        | 39 +++++++++++++++++++++++----------------
  4 files changed, 97 insertions(+), 27 deletions(-)
 ```
+
+## Commit at 2026-08-03 19:29
+```
+commit e80546e27bc0b5bacb62a939ead8164eec1a1e6b
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 19:29:07 2026 +0530
+
+    Capture: glossary-retrieval slice log; promote Voyage rate-limit ratchet
+    
+    Slice log for the glossary-retrieval slice (commits a000513, dd3c561).
+    Per direct sign-off, promotes the 3rd-consecutive-slice Voyage rate-limit
+    friction pattern from a per-slice comment to a CLAUDE.md standing rule.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ CLAUDE.md                                   |   5 +++++
+ plans/logs/2026-08-03-glossary-retrieval.md | 109 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                 |  28 ++++++++++++++++++++++++++++
+ 3 files changed, 142 insertions(+)
+```
+
+## Commit at 2026-08-03 19:31
+```
+commit 17b4684f8467a70b9ca9a7dc72d5b187c6fc3b6a
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 19:31:27 2026 +0530
+
+    Handoff: glossary-retrieval slice done, next brief is the one-shot repair loop
+    
+    HANDOFF.md rewritten with this session's verified state (glossary
+    retrieval live and eval-confirmed at 6/6, the mid-slice regression caught
+    and fixed, the Voyage rate-limit ratchet promotion) and the next brief:
+    the one-shot repair loop (PRD F2/F3), closing out M3.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md | 329 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------------------
+ 1 file changed, 166 insertions(+), 163 deletions(-)
+```
+
+## Commit at 2026-08-03 21:22
+```
+commit ba76f7954bd6a269e5fa919d9833e0907b4924ae
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 21:22:51 2026 +0530
+
+    One-shot SQL repair loop: get_answer() self-corrects on validate/execute failure
+    
+    Closes M3. New repair_sql() (question + failed SQL + real error -> one
+    Anthropic call, no internal retry, reusing GenerateSqlResponse) fires
+    exactly once when validate_sql() or execute_sql() fails inside
+    get_answer(), via a new _retry_once(attempt, recover) helper whose
+    propagate-on-second-failure semantics are proven deterministically
+    (RetryOnceTests, no mocking needed since the helper has no I/O of its
+    own). Adds evals/repair_sql.md so the new prompt has real eval coverage.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ app/pipeline/answer.py                      |  52 ++++++++++++++++++++++++++-----
+ app/pipeline/repair_sql.py                  |  50 ++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-03-repair-loop.md | 239 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ evals/repair_sql.md                         |  63 ++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-03-repair-loop.md      |  94 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ prompts/repair_sql.md                       |  28 +++++++++++++++++
+ tests/test_answer_repair.py                 | 265 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_repair_sql.py                    | 178 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 8 files changed, 961 insertions(+), 8 deletions(-)
+```
