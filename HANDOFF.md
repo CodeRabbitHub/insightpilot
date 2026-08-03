@@ -1,195 +1,188 @@
 # Handoff
 
-Date: 2026-08-02
-Slice just completed: plans/briefs/2026-08-02-pgvector-schema-retrieval.md +
-  plans/logs/2026-08-02-pgvector-schema-retrieval.md (commit 92c76d9)
+Date: 2026-08-03
+Slice just completed: plans/briefs/2026-08-02-eval-harness-v1.md +
+  plans/logs/2026-08-03-eval-harness-v1.md (commit cd1edf0, plus a
+  follow-up ratchet commit 3e92b00 to CLAUDE.md)
 
 ## State of the work
-- **M3's first retrieval link is complete**: `generate_sql()`'s schema
-  context now comes from a pgvector top-k similarity search over embedded
-  table descriptions, not the full 9-table catalog.
-- `app/catalog/embed.py` — new module: `SCHEMA_DDL` (creates
-  `app.catalog_embeddings(table_id INTEGER PRIMARY KEY REFERENCES
-  app.catalog_tables(id), embedding vector(1024) NOT NULL)`, plus
-  `CREATE EXTENSION IF NOT EXISTS vector` defensively), `VOYAGE_MODEL =
-  "voyage-3.5"`, `EMBEDDING_DIMENSION = 1024`, `to_vector_literal(embedding)`
-  (formats a float list as a pgvector text literal — no `pgvector` python
-  package needed, values move through psycopg2 as `%s::vector`-cast text),
-  `embed_text(client, model, text, input_type)` (wraps
-  `client.embed(...)`, with a bounded rate-limit retry: 4 attempts, 20s
-  apart, specifically for `voyageai.error.RateLimitError` — added mid-slice
-  after the real dev Voyage account, on its free tier's 3 RPM cap, tripped
-  during both a manual bulk-embed run and the full test suite), and
-  `embed()` (loops `describe.fetch_tables(cur)`, skips any table already in
-  `catalog_embeddings`, raises if `description is None`, embeds with
-  `input_type="document"`, upserts, commits per-row — deliberately unlike
-  `sync.py`'s single final commit, since embedding is a billed call and a
-  mid-run crash shouldn't force re-embedding already-paid-for tables).
-- `app/catalog/verify_embed.py` — new done-check CLI (added beyond the
-  brief's literal done-check, for consistency with `sync`/`describe`'s
-  paired-verify-script convention; flagged explicitly at Gate 1).
-- `app/pipeline/generate_sql.py` — new `retrieve_relevant_tables(cur,
-  voyage_client, question, k=RETRIEVAL_K)` (`RETRIEVAL_K = 5`): embeds
-  `question` with `input_type="query"`, runs `ORDER BY ce.embedding <=>
-  %s::vector LIMIT %s` joining `catalog_embeddings` to `catalog_tables`.
-  `build_schema_context(cur, tables)`'s signature changed — takes a
-  pre-fetched rows list instead of calling `fetch_tables(cur)` itself, so
-  it works for any subset. `generate_sql()` now builds a `voyageai.Client`
-  alongside the existing Anthropic client and calls
-  `retrieve_relevant_tables()` then `build_schema_context()`.
-- `requirements.txt` gained `voyageai==0.5.0` (pinned; ARCHITECT.md's own
-  Voyage AI amendment pre-approved it). `.env.example` gained
-  `VOYAGE_API_KEY`; the real `.env` has a working key.
-- The no-slop-reviewer pass (two rounds) found one issue: `embed_text()`'s
-  new rate-limit retry logic had zero test coverage. Fixed with
-  `EmbedTextRateLimitRetryTests` in `tests/test_catalog_embed.py` — fake
-  Voyage client stand-ins + patched `time.sleep`, runs in 0.001s, no real
-  network. Second round confirmed clean.
-- `tests/test_generate_sql_cli.py`'s pre-existing
-  `test_build_schema_context_covers_all_nine_tables` (which asserted the
-  old full-catalog behavior) was rewritten to assert a genuine top-k
-  subset instead, per the brief's explicit "never hardcode the full table
-  list" instruction — confirms `order_items`/`products` are retrieved and
-  the set is smaller than all 9.
-- `tests/test_llm_description_setup.py`'s dependency allowlist and
-  `tests/test_env_example.py`'s `REQUIRED_VARS` both extended for
-  `voyageai`/`VOYAGE_API_KEY` (same precedent as `sqlglot`/`asyncpg`/
-  `ANTHROPIC_API_KEY` in prior slices).
-- `evals/generate_sql.md` extended with a second case: the same fixed
-  question under retrieved (not full-catalog) context produces
-  structurally identical SQL — retrieval didn't regress quality for this
-  one question (still a smoke check, not statistical confidence).
-- 113 tests pass (`python -m unittest discover tests`, via the project
-  `.venv`) — 111 from prior slices (2 net removed/rewritten as one) + 9
-  new (4 in `test_catalog_embed.py`'s CLI class + 2 in its new
-  rate-limit-retry unit test class + 3 in `test_verify_embed_script.py`).
-- All 9 olist tables are embedded in the real dev database right now
-  (`python -m app.catalog.verify_embed` passes).
+- **The project has its first automated accuracy number.** `evals/run.py`
+  loads `evals/questions.yaml` (5 curated questions, each hand-verified
+  live against the real `olist` DB this session), runs each through the
+  real `answer.get_answer(question)` pipeline, grades pass/fail via
+  `check_expected()` (two assertion kinds: `top_row` — membership check
+  against the first result row's values, column-order/name agnostic;
+  `scalar` — single-value match with an optional `tolerance`), and prints
+  a per-question PASS/FAIL line plus an "N/5 correct" summary. Current
+  real score: 5/5.
+- `app/pipeline/generate_sql.py`'s `generate_sql()` and
+  `app/pipeline/answer.py`'s `get_answer()` both gained an optional
+  `question` parameter (default `FIXED_QUESTION`) — every existing
+  zero-arg CLI/verify script call site is unchanged and still passes.
+- `requirements.txt` gained `PyYAML==6.0.3` (pinned, confirmed at Gate 1).
+- `evals/__init__.py` (empty) + `evals/questions.yaml` (a top-level YAML
+  list — not a `{questions: [...]}` wrapper — of 5
+  `{question, expected}` mappings) + `evals/run.py` (`load_questions`,
+  `check_expected`, `format_summary`, `main`) are new. This exact shape
+  came from the test-writer subagent (blind to my own Gate-1 plan, which
+  had proposed a wrapper dict and a different function contract) — the
+  tests were treated as the real spec once written, and the
+  implementation was built to match them.
+- New tests: `tests/test_eval_questions_yaml.py` (structural checks on
+  the yaml), `tests/test_eval_run_grading.py` (pure, no-network unit
+  tests for `check_expected`/`load_questions`/`format_summary` against
+  synthetic fixtures — the brief's "known-good and known-bad fixture
+  case" requirement), `tests/test_eval_run_cli.py` +
+  `tests/_eval_helpers.py` (the literal done-check, real/billed),
+  `tests/test_question_parameter.py` (pure signature checks plus two
+  real end-to-end classes proving the `question` param is genuine
+  plumbing, not silently ignored). `tests/test_llm_description_setup.py`
+  extended for the `pyyaml` dependency allowlist + a version-pin check.
+- **A real, previously-undiagnosed bug in `.claude/hooks/stop_verify.py`
+  was found and fixed this session**: its subprocess timeout was 300s,
+  but the real suite now takes ~650-900s (real Voyage/Anthropic calls,
+  Voyage's free-tier 3 RPM limit). The old timeout was silently killing
+  the suite mid-run on every agent turn; a hard kill can skip a test's
+  `finally` cleanup, and two *pre-existing, unrelated* tests
+  (`test_catalog_sync.py`'s `test_sync_preserves_an_existing_description_across_a_resync`,
+  `test_verify_describe_script.py`'s `test_verify_describe_fails_when_a_description_is_missing`)
+  mutate-then-restore a shared `app.catalog_tables.customers.description`
+  row as part of their own checks, so a kill mid-flight permanently
+  corrupts it until someone notices and repairs it by hand (which
+  happened, repeatedly, this session — always fixed via
+  `UPDATE ... SET description = NULL` + `python -m app.catalog.describe`
+  to regenerate a real one). Timeout bumped to 1200s (commit `cd1edf0`);
+  CLAUDE.md's `Test:` line now documents the real ~15min runtime (commit
+  `3e92b00`), a second-repetition ratchet promotion (Voyage rate limits
+  have now caused friction in two consecutive slices).
+- `evals/generate_sql.md`/`evals/table_description.md` were NOT extended
+  this slice — this slice's own `evals/questions.yaml` + `evals/run.py`
+  *is* the eval artifact; no prompt or retrieval logic changed, only
+  which question flows through the existing pipeline.
 
 ## Proof
 ```
-$ python -m app.catalog.verify_embed
-Embeddings:
-  [OK] olist.customers: embedding=1024 dims
-  [OK] olist.geolocation: embedding=1024 dims
-  [OK] olist.order_items: embedding=1024 dims
-  [OK] olist.order_payments: embedding=1024 dims
-  [OK] olist.order_reviews: embedding=1024 dims
-  [OK] olist.orders: embedding=1024 dims
-  [OK] olist.product_category_name_translation: embedding=1024 dims
-  [OK] olist.products: embedding=1024 dims
-  [OK] olist.sellers: embedding=1024 dims
-
-verify_embed: PASSED
-
-$ python -m app.pipeline.verify_generate_sql
-Generated SQL:
-SELECT p.product_category_name, COUNT(DISTINCT oi.order_id) AS number_of_orders FROM olist.order_items oi JOIN olist.products p ON oi.product_id = p.product_id GROUP BY p.product_category_name ORDER BY number_of_orders DESC LIMIT 5
-
-verify_generate_sql: PASSED
+$ python -m evals.run
+[PASS] What are the top 5 product categories by number of orders?
+[PASS] Which payment type is used the most, by number of payments?
+[PASS] Which customer state has the most customers?
+[PASS] How many orders have the status 'delivered'?
+[PASS] What is the average review score across all reviews?
+5/5 correct
 
 $ python -m unittest discover tests
-.................................................................................................................
+.............................................................................................................................................
 ----------------------------------------------------------------------
-Ran 113 tests in 173.223s
+Ran 139 tests in 651.003s
 
 OK
 ```
 
 ## Open questions / known issues
-- **Voyage's free-tier 3 RPM rate limit is real and will recur.** Any
-  future slice adding a Voyage call (e.g. F5 glossary retrieval) will hit
-  the same ceiling. `embed_text()`'s retry-with-backoff is the pattern to
-  reuse, not reinvent. First occurrence this slice — not yet promoted to
-  a standing CLAUDE.md rule (ratchet threshold is second repetition).
-- **`generate_sql()`/`get_answer()` are still hardcoded to
-  `FIXED_QUESTION`** — no arbitrary-question support anywhere in the
-  pipeline yet. The next slice (below) needs to change this minimally
-  (an optional `question` parameter, default `FIXED_QUESTION`, zero
-  behavior change to existing CLI/verify scripts) to run more than one
-  question through the pipeline at all.
-- **No PyYAML dependency yet.** `evals/questions.yaml` (named in
-  CLAUDE.md's Commands and PRD.md §10) needs a YAML parser; `voyageai`
-  pulled in `pyyaml` transitively this slice, but it isn't pinned as an
-  explicit top-level dependency the way every other import in this
-  codebase is. Needs asking/confirming at next Gate 1 per CLAUDE.md's "no
-  new dependencies without asking" rule — flagging now, not deciding now.
-- PRD.md §10 specifies an eventual 30-question eval set and an ≥80%
-  ship-gate target — both are M8 concerns. This project's own
-  `templates/eval.md` says "start with 5"; the next slice below starts
-  there deliberately, not at 30.
+- **A deeper, systemic concurrency hazard remains, unfixed.** Even after
+  the stop_verify.py timeout fix, a full-suite run can still hit the same
+  `customers`-description corruption if two full-suite invocations
+  genuinely overlap in time (confirmed directly this session: a second
+  fresh attempt during this slice's own gate hit the identical symptom
+  with zero code changes in between). The Stop hook fires automatically
+  on every agent turn boundary, so a long-running manual
+  `python -m unittest discover tests` (this session's real runtime:
+  ~650-900s) can overlap with one or more hook-triggered runs, and the
+  two genuinely race on the same DB row via ordinary concurrent-access
+  semantics (not just kills). Root cause is now well understood
+  (two pre-existing tests do a non-atomic "capture original, mutate,
+  verify, restore" against `ORDER BY table_name LIMIT 1`, i.e. always
+  `customers`, with no locking), but a real fix (e.g. a stop_verify lock
+  file so overlapping invocations can't run concurrently, or making
+  those two tests target an isolated row/table instead of a shared one)
+  was explicitly deferred as out-of-scope for this slice, by direct user
+  decision. **If a future session sees `customers`'s description show up
+  as `'a hand-set description for this test'` or fail a
+  word-count/idempotency check, this is why** — repair via
+  `UPDATE app.catalog_tables SET description = NULL WHERE table_name =
+  'customers'` then `python -m app.catalog.describe`, not by touching
+  test logic.
+- **Voyage's free-tier 3 RPM rate limit continues to be a real,
+  recurring cost** (now flagged twice — see CLAUDE.md's `Test:` line).
+  Any future slice adding more Voyage calls (e.g. the glossary retrieval
+  slice below) will add to the real suite's already-long runtime.
 - Lint/type tooling (`ruff`, `mypy`) and the test runner (`unittest`, not
   `pytest`) remain unaddressed, carried over from every prior slice —
   still not blocking.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-A working eval harness — `evals/questions.yaml` + `python -m evals.run`
-— runs a small set of curated real-world questions through the real,
-already-built pipeline (`generate_sql` → `validate_sql` → `execute_sql`,
-via `answer.get_answer()`) and reports a per-question pass/fail plus an
-overall accuracy score.
+For the fixed question (and, by extension, every `evals/questions.yaml`
+question), `generate_sql()`'s prompt context includes top-k relevant
+business-glossary entries (KPI definitions) alongside the existing top-k
+schema context, retrieved via the same pgvector pattern already built
+for schema retrieval.
 
 Constraints:
-Start with exactly 5 curated questions (per `templates/eval.md`'s own
-"start with 5" guidance and PRD.md §10's eventual 30 being an M8, not
-M3, target) — each needs a real expected-result assertion (e.g. a
-specific top value, a specific count), hand-verified against the real
-`olist` database during this slice, not invented. To run more than the
-one `FIXED_QUESTION`, `generate_sql()` and `answer.get_answer()` both
-need an optional `question` parameter defaulting to `FIXED_QUESTION` —
-every existing CLI (`python -m app.pipeline.generate_sql`, `python -m
-app.pipeline.answer`) and both verify scripts must keep their exact
-current behavior with zero code changes on their end, proven by the
-full existing test suite passing unchanged. `validate_sql.py`/
-`execute_sql.py` need no changes — they already operate on a raw SQL
-string, not a question. Grading is exact-match or code-assertion only
-(no LLM-as-judge) — same threshold `evals/generate_sql.md`/
-`evals/table_description.md` already established (revisit once the set
-grows past what's easy to read by hand). New dependency: `PyYAML`, to
-parse `evals/questions.yaml` — confirm at Gate 1 (already pulled in
-transitively by `voyageai`, but needs its own explicit pin like every
-other dependency in `requirements.txt`).
+New file `glossary.md` at the repo root, seeded with ~15 KPI definitions
+per PRD.md F5 (Revenue, AOV, Repeat purchase rate, Delivery time, Review
+score, Churn proxy, etc.), each with an exact formula referencing real
+`olist` columns — hand-written/verified against the real schema, not
+invented loosely. Reuse the exact same Voyage AI embeddings provider,
+`voyage-3.5` model, and `embed_text()`'s existing rate-limit
+retry-with-backoff (`app/catalog/embed.py`) — no new provider, no
+reinvented retry logic. New `app`-schema table for glossary chunk
+embeddings (one row per KPI definition; exact name proposed at Gate 1 —
+`app.kb_chunks` was explicitly reserved as out-of-scope-to-create by the
+llm-table-descriptions slice's own tests, strongly implying it's the
+intended name here). New idempotent embed script mirroring
+`app/catalog/embed.py`'s exact convention (skip already-embedded
+entries, commit per-row, its own `verify_*` CLI). `generate_sql.py` gains
+a `retrieve_relevant_glossary_entries(cur, voyage_client, question, k=...)`
+analogous to the existing `retrieve_relevant_tables()`, called with the
+same `question` parameter now threaded through `generate_sql()`.
+`prompts/generate_sql.md` gains a glossary-context placeholder (a real
+templated section, not a hardcoded string). Per CLAUDE.md's binding
+rule, a prompt change without an eval run is not done — `evals/run.py`
+must be re-run after this change and its score reported, even if
+unchanged from 5/5. No new dependencies expected (reuses `voyageai`,
+already pinned).
 
 Inputs:
-PRD.md §10 (the eval spec: `evals/questions.yaml`, accuracy scoring,
-eventual 30-question/≥80% targets); `templates/eval.md` (the case-table
-shape); `evals/generate_sql.md` and `evals/table_description.md` (this
-project's existing per-slice eval-log precedent, including the
-LLM-as-judge deferral threshold); `app/pipeline/answer.py`'s
-`get_answer()`; `app/pipeline/generate_sql.py`'s `generate_sql()` and
-`FIXED_QUESTION`; the real `olist` schema (for hand-verifying the 5
-questions' expected assertions).
+PRD.md's F5 section (glossary spec: ~15 KPIs, chunked per definition,
+embedded into pgvector, retrieved alongside schema context); ARCHITECT.md
+(Voyage AI + pgvector decisions); `app/catalog/embed.py` (the exact
+pattern to mirror: `SCHEMA_DDL`, `to_vector_literal`, `embed_text`,
+idempotent `embed()`); `app/pipeline/generate_sql.py`'s
+`retrieve_relevant_tables()`/`build_schema_context()`/`build_prompt()`/
+`generate_sql()`; `prompts/generate_sql.md`; `evals/questions.yaml` +
+`evals/run.py` (this slice's own eval harness, used to prove glossary
+retrieval doesn't regress accuracy).
 
 Outputs:
-- `requirements.txt` gains `PyYAML` (pinned, pending Gate 1 confirmation).
-- `evals/questions.yaml` — 5 curated questions, each with an expected
-  assertion checkable in code (e.g. `{question: "...", expected: {top_row:
-  ["beleza_saude", 8836]}}` or similar — exact shape proposed at Gate 1).
-- `evals/run.py` (+ `evals/__init__.py` if needed for `python -m
-  evals.run` to work as a package) — loads `questions.yaml`, calls
-  `answer.get_answer(question)` per question, checks the result against
-  its expected assertion, prints a per-question PASS/FAIL line and a
-  final "N/5 correct" summary.
-- `generate_sql()` and `get_answer()` gain an optional `question`
-  parameter (default `FIXED_QUESTION`) threaded through
-  `retrieve_relevant_tables()`/`build_schema_context()`/`call_llm_for_sql()`
-  — no other behavior change.
-- Tests: the parameterization doesn't change `FIXED_QUESTION`'s default
-  behavior (full existing suite passes unchanged); the eval runner
-  correctly reports pass/fail against a known-good and a known-bad
-  fixture case.
+- `glossary.md` — ~15 KPI definitions with real `olist` column
+  references.
+- New DDL (`app.kb_chunks` or the name confirmed at Gate 1): one
+  embedding vector + chunk text per glossary entry.
+- A new idempotent embed script + its own `verify_*` CLI, mirroring
+  `app/catalog/embed.py`'s convention exactly.
+- `generate_sql.py` gains `retrieve_relevant_glossary_entries()` +
+  glossary-context building, called alongside the existing schema
+  retrieval inside `generate_sql()`, using the same `question`.
+- `prompts/generate_sql.md` extended with a real glossary-context
+  section.
+- Tests: glossary retrieval returns a genuine top-k subset (never a
+  hardcoded full-list check, mirroring the schema-retrieval slice's own
+  test precedent); the new embed script is idempotent across two runs.
+- `evals/run.py`'s score re-reported after the prompt change (still 5/5,
+  or an honestly lower/different number with an explanation).
 
 Done-check:
-`python -m evals.run` exits 0 and prints a real accuracy score (e.g.
-"5/5 correct" or honestly fewer) for the 5 curated questions — paste
-output. Separately, `python -m unittest discover tests` still passes in
-full, proving the `question` parameter change didn't alter any existing
-CLI's default behavior — paste output.
+`python -m evals.run` exits 0 and reports its score after the glossary
+context is added — paste output, and confirm it's not a regression from
+this slice's 5/5. Separately, `python -m unittest discover tests` passes
+in full — paste output (expect ~15-20 min real runtime; not hung, see
+CLAUDE.md).
 
 Out-of-scope:
-Reaching PRD's eventual 30-question set or its ≥80% ship-gate
-enforcement (M8), the one-shot repair loop, business glossary retrieval
-(F5), any new CLI flag for end-user-supplied arbitrary questions in a
-production surface (M4/M5), changes to `validate_sql.py`/
-`execute_sql.py` internals, LLM-as-judge grading, FastAPI/frontend, CI.
+Document upload/parsing UI (F5 explicitly excludes this — glossary is
+seeded, not uploaded); the one-shot repair loop (a separate remaining M3
+slice); changing `retrieve_relevant_tables()`/schema retrieval's own
+behavior; `validate_sql.py`/`execute_sql.py` internals; FastAPI/frontend;
+CI; fixing the deeper stop_verify.py/shared-DB-test concurrency hazard
+noted above (a real, separate, dedicated slice of its own).

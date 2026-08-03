@@ -585,3 +585,64 @@ Date:   Sun Aug 2 23:35:08 2026 +0530
  plans/logs/_auto-capture.md                        |  68 +++++++++++++++++++++++++++++++++++
  4 files changed, 336 insertions(+), 142 deletions(-)
 ```
+
+## Commit at 2026-08-03 13:39
+```
+commit cd1edf049b4fa6329efc3430879aa2480f78fefe
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 13:39:30 2026 +0530
+
+    Eval harness v1: run 5 curated questions through the real pipeline
+    
+    evals/run.py + evals/questions.yaml give the project its first automated
+    accuracy number, per PRD.md's Section 10 eval spec. generate_sql()/
+    get_answer() gain an optional `question` parameter (default
+    FIXED_QUESTION) to unlock running more than the one fixed question, with
+    zero behavior change to any existing CLI/verify script.
+    
+    Also bumps stop_verify.py's test-suite timeout from 300s to 1200s: the
+    real suite now takes ~650-900s (real Voyage/Anthropic calls under rate
+    limiting), so the old timeout was killing it mid-run on every agent turn,
+    which can corrupt shared DB state used by pre-existing integration tests.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ .claude/hooks/stop_verify.py                    |  12 +++++++-
+ app/pipeline/answer.py                          |  14 +++++-----
+ app/pipeline/generate_sql.py                    |   6 ++--
+ artifacts/reviews/2026-08-03-eval-harness-v1.md | 143 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ evals/__init__.py                               |   0
+ evals/questions.yaml                            |  34 +++++++++++++++++++++++
+ evals/run.py                                    |  99 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-02-eval-harness-v1.md      |  72 +++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                     |  27 ++++++++++++++++++
+ requirements.txt                                |   1 +
+ tests/_eval_helpers.py                          |  33 ++++++++++++++++++++++
+ tests/test_eval_questions_yaml.py               | 114 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_eval_run_cli.py                      |  88 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_eval_run_grading.py                  | 162 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_llm_description_setup.py             |  20 +++++++++++++
+ tests/test_question_parameter.py                | 234 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 16 files changed, 1048 insertions(+), 11 deletions(-)
+```
+
+## Commit at 2026-08-03 14:15
+```
+commit 3e92b00dfed192f822a3e31f57a9f2fd438bc370
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 14:15:05 2026 +0530
+
+    CLAUDE.md: note the test suite's real ~15min runtime
+    
+    Second-repetition ratchet from the eval-harness-v1 slice log: Voyage's
+    rate limits have now caused friction in two consecutive slices (retry
+    backoff, then a stop_verify.py timeout bug this suite's real runtime
+    exposed). Documenting the real runtime so it's never mistaken for hung.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01RHYURdPacUjzbFPaPJdcwY
+
+ CLAUDE.md | 2 ++
+ 1 file changed, 2 insertions(+)
+```
