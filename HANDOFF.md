@@ -1,64 +1,64 @@
 # Handoff
 
 Date: 2026-08-03
-Slice just completed: plans/briefs/2026-08-03-glossary-retrieval.md +
-  plans/logs/2026-08-03-glossary-retrieval.md (commits a000513, dd3c561,
-  e80546e)
+Slice just completed: plans/briefs/2026-08-03-repair-loop.md +
+  plans/logs/2026-08-03-repair-loop.md (commit ba76f79)
 
 ## State of the work
-- **`generate_sql()` now retrieves business-glossary context alongside
-  schema context, via pgvector, for every question.** `glossary.md` (16
-  KPI definitions: Revenue, AOV, Repeat Purchase Rate, Average Delivery
-  Time, On-Time Delivery Rate, Average Review Score, Low Review Rate,
-  Churn Proxy, Freight Ratio, Average Items per Order, Order Cancellation
-  Rate, Order Approval Time, Average Payment Installments, Active Seller
-  Count, Top Product Category, Payment Type Mix) is embedded into a new
-  `app.kb_chunks(id, source, content, embedding vector(1024))` table by a
-  new `app/glossary/` package (`embed.py` + `verify_embed.py`), mirroring
-  `app/catalog/embed.py`'s exact convention — same Voyage client,
-  `embed_text`/`to_vector_literal`/`VOYAGE_MODEL`/`EMBEDDING_DIMENSION`
-  imported, not reimplemented. `generate_sql.py` gained
-  `retrieve_relevant_glossary_entries(cur, voyage_client, question,
-  k=GLOSSARY_RETRIEVAL_K=3)` and `build_glossary_context()`, called
-  alongside the existing `retrieve_relevant_tables()`/
-  `build_schema_context()` inside `generate_sql()`. `prompts/generate_sql.md`
-  gained a real `$glossary_context` templated section.
-- **A real regression was caught and fixed by running the eval fresh,
-  not by trusting the code looked right.** The first draft of
-  `glossary.md`'s "Top Product Category" and "Repeat Purchase Rate"
-  entries were too prescriptive and leaked into unrelated questions
-  (steering the LLM toward `COUNT(*)` + translated category names, and
-  toward always grouping by `customer_unique_id` even for a plain
-  "count customers by state" question) — dropped the eval from 5/5 to
-  3/5. Rewrote both entries to explicitly scope their guidance, deleted
-  and re-embedded the two affected `app.kb_chunks` rows, reconfirmed 5/5
-  twice. Full detail: `artifacts/reviews/2026-08-03-glossary-retrieval.md`.
-- **The eval set grew to 6 questions.** Added "What is the average order
-  value?" (`expected.scalar: 137.7541, tolerance: 0.01`, hand-verified
-  live) specifically because none of the original 5 questions directly
-  exercises glossary-informed KPI computation — they only caught the
-  regression above by accident. Two tests that had hardcoded "exactly
-  5"/"N/5" assumptions (`tests/test_eval_questions_yaml.py`,
-  `tests/test_eval_run_cli.py`) were loosened to "at least 5"/"N/M",
-  since the eval set's own documented lifecycle
-  (`templates/eval.md`: "start with 5; every production/demo failure
-  adds a case") always intended growth past 5.
-- **Voyage's free-tier 3 RPM rate limit caused a real failure for the
-  3rd consecutive slice**, now promoted from a per-slice comment to a
-  CLAUDE.md standing rule: any future change adding a new Voyage/
-  Anthropic call site must budget for rate-limit contention in the same
-  slice. Concretely this slice: `RATE_LIMIT_MAX_ATTEMPTS` 4→6
-  (`app/catalog/embed.py`, shared/reused by `app/glossary/embed.py`);
-  `stop_verify.py`'s subprocess timeout 1200s→2400s;
-  `tests/_answer_helpers.py`'s/`tests/_generate_sql_helpers.py`'s own
-  subprocess timeouts 120s→450s; CLAUDE.md's documented real test
-  runtime ~15min→~30min. Root cause: `generate_sql()` now makes two
-  independent Voyage embed calls per question (schema + glossary), a
-  known, accepted, in-code-documented tradeoff — the brief kept
-  `retrieve_relevant_tables()`'s own signature out of scope, so the two
-  calls can't share one embedding.
+- **`get_answer()` now self-corrects once via a new one-shot repair
+  loop, closing out M3 entirely** (retrieval + repair + evals). New
+  `app/pipeline/repair_sql.py`'s `repair_sql(question, failed_sql,
+  error_message)` makes one Anthropic call (no internal retry --
+  PRD F2's "max 2 attempts total" budgets exactly one generate + one
+  repair call) against a new, versioned `prompts/repair_sql.md`
+  (`string.Template`, 3 placeholders: `$question`/`$failed_sql`/`$error`),
+  reusing the existing `GenerateSqlResponse` Pydantic model and
+  `DEFAULT_MODEL` from `generate_sql.py` -- no new provider, no new
+  response schema.
+- **`app/pipeline/answer.py` was refactored into three layers**:
+  `_validate_and_execute(sql)` (the original validate-then-execute
+  chain, unchanged in behavior), a new `_retry_once(attempt, recover)`
+  (a pure, I/O-free control-flow helper -- try `attempt()`, on any
+  exception call `recover(exc)` once, let a second failure propagate
+  unmodified), and `_answer_with_repair(question, sql)` (binds
+  `_retry_once` to the real `_validate_and_execute`/`repair_sql` calls).
+  `get_answer()` is now just `generate_sql()` then
+  `_answer_with_repair()`.
+- **The "second failure propagates unmodified" claim (PRD F2's exact
+  wording) is proven deterministically, with zero mocking** -- this was
+  a genuine mid-gate correction. The first gate draft left it as a
+  written exception (reasoning that forcing a guaranteed double-failure
+  would need mocking `repair_sql()`'s output, against this project's
+  no-mock convention). Directly instructed to fix it rather than accept
+  the exception: extracting `_retry_once()` gave the propagation
+  semantics zero I/O of their own, so `RetryOnceTests`
+  (`tests/test_answer_repair.py`) proves them with plain, real Python
+  functions standing in for `attempt`/`recover` -- not mocks of any real
+  dependency, since there's nothing to mock at that layer. Lesson
+  worth carrying forward: "can't test this without mocking" is often
+  "haven't found the seam yet," not a genuine dead end.
+- **A new `evals/repair_sql.md` gives the new prompt real eval
+  coverage** -- `evals/questions.yaml`'s 6/6 never exercises
+  `repair_sql.md` at all (every question succeeds on the first
+  `generate_sql()` try), so this was a real gap the no-slop-reviewer
+  subagent caught (matching the exact pattern from the generate-sql
+  slice: "a prompt change without an eval run is not done"). Two real
+  cases, one per way `_answer_with_repair()` can trigger repair: a
+  `validate_sql()` rejection (`SELECT nonexistent_column_xyz FROM
+  olist.orders` -> repaired to `SELECT COUNT(*) FROM olist.orders`) and
+  a real `execute_sql()` failure (`SELECT price / (price - price) ...`
+  -> division by zero -> repaired to `SELECT AVG(price) / AVG(price)
+  ...`, which executed and returned real rows).
 - Both done-checks pass fresh, most recent run:
   ```
+  $ python -m unittest discover -s tests -p "test_repair_sql.py" -v
+  Ran 6 tests in 19.535s
+  OK
+
+  $ python -m unittest discover -s tests -p "test_answer_repair.py" -v
+  Ran 12 tests in 4.178s
+  OK
+
   $ python -m evals.run
   [PASS] What are the top 5 product categories by number of orders?
   [PASS] Which payment type is used the most, by number of payments?
@@ -67,125 +67,135 @@ Slice just completed: plans/briefs/2026-08-03-glossary-retrieval.md +
   [PASS] What is the average review score across all reviews?
   [PASS] What is the average order value?
   6/6 correct
-  ```
-  ```
-  $ python -m unittest discover tests
-  Ran 172 tests in 219.629s
 
+  $ python -m unittest discover tests
+  Ran 190 tests in 203.893s
   OK
   ```
-- Real, live shipping proof beyond the curated eval questions: asking
-  "What is the average order value?" retrieved the `average-order-value-aov`
-  glossary entry as the top hit and generated
-  `SELECT SUM(price) / COUNT(DISTINCT order_id) AS average_order_value
-  FROM olist.order_items`, which executed to a real `137.7540763788944520`
-  — matching the KPI's own formula exactly.
+- Real, live shipping proof beyond the curated eval questions:
+  `python -m app.pipeline.verify_answer` PASSED (unchanged happy path
+  through the refactored `get_answer()`), plus the two live repair-path
+  demonstrations documented above with full input/output in
+  `evals/repair_sql.md`.
 
 ## Proof
-See the two command blocks above (`evals.run`, `unittest discover tests`).
-Both were run fresh, standalone, this session, on the final committed
-state.
+See the four command blocks above (`test_repair_sql`, `test_answer_repair`,
+`evals.run`, `unittest discover tests`). All run fresh, standalone, this
+session, on the final committed state (`ba76f79`).
 
 ## Open questions / known issues
-- **The pre-existing Stop-hook/shared-mutable-DB-row concurrency hazard
-  (first documented in the eval-harness-v1 handoff) is still unresolved
-  and still out of scope.** It recurred repeatedly this session: 5 of 7
-  full-suite attempts failed on it, in three different shapes — the
-  known `customers`-description race, a *new* instance of the same
-  pattern on `app.kb_chunks` (`tests/test_glossary_verify_embed.py`'s own
-  mutate-restore-in-`finally` test hit a `UniqueViolation` when a
-  concurrent run's restore raced it), and a genuine Postgres deadlock in
-  `test_seed_idempotency.py` (an M1-era test with zero connection to this
-  slice's code) that is direct proof two full-suite invocations
-  genuinely overlapped in time. If a future session sees a similar
-  mutate-restore test fail with a `UniqueViolation`/duplicate-key error,
-  or `customers`'s description show up as a stub, this is why — repair
-  the specific row (`UPDATE ... SET description = NULL` +
-  `python -m app.catalog.describe` for `customers`; re-run
+- **The Stop-hook/shared-DB-row concurrency hazard is now this
+  session's dedicated next slice -- root cause is precisely diagnosed
+  for the first time.** `.claude/hooks/stop_verify.py` runs a full
+  `python -m unittest discover tests` automatically every time the
+  agent's turn ends, completely independent of anything run manually.
+  Any full-suite invocation (manual, or a stray `run_in_background:
+  true` one still executing across a turn boundary) can therefore
+  overlap with the hook's own automatic run against the *same live
+  Postgres database*. Two specific tests are structurally guaranteed to
+  race when that overlap lands during their execution window, because
+  each does a REAL, committed mutation of a shared row (not a
+  transaction rollback) so a subprocess it shells out to can observe
+  the change:
+  - `tests/test_verify_describe_script.py:73-109`
+    (`test_verify_describe_fails_when_a_description_is_missing`) --
+    `SELECT ... ORDER BY table_name LIMIT 1` (always picks `customers`,
+    alphabetically first), sets its `app.catalog_tables.description` to
+    `NULL`, shells out to `python -m app.catalog.verify_describe`
+    (a fresh connection, so it must see a *committed* change), asserts
+    non-zero exit, restores the original description in `finally`.
+  - `tests/test_glossary_verify_embed.py:66-104`
+    (`test_verify_embed_fails_when_a_kb_chunk_is_missing`) -- same
+    shape: `SELECT ... ORDER BY source LIMIT 1` (always picks
+    `active-seller-count`), `DELETE`s that `app.kb_chunks` row, shells
+    out to `python -m app.glossary.verify_embed`, asserts non-zero
+    exit, re-`INSERT`s the original row in `finally`.
+  - `tests/test_seed_idempotency.py` hit a genuine Postgres deadlock
+    this session too -- an M1-era test with zero connection to this
+    slice's code, but direct proof two full-suite invocations
+    genuinely overlapped in time.
+
+  Recurred across 3 consecutive sessions now (first logged in the
+  eval-harness-v1 handoff, recurred in glossary-retrieval, recurred
+  again this session) -- well past the ratchet's "2nd repetition ->
+  promote" threshold. **Per direct sign-off, this is the next slice**
+  (brief below), not another deferral. If it recurs again before then:
+  repair the specific row (`UPDATE app.catalog_tables SET description =
+  NULL` + `python -m app.catalog.describe` for `customers`;
   `python -m app.glossary.embed` after deleting the affected
-  `app.kb_chunks` row(s) if one goes missing) rather than touching test
-  logic. A real fix (a stop_verify lock file, or giving the shared-row
-  tests their own isolated row) remains a dedicated slice of its own —
-  now overdue given it has cost real time in two consecutive sessions.
+  `app.kb_chunks` row if one goes missing -- `embed()` only re-embeds
+  sources not already present, so it's always safe to re-run) rather
+  than touching test logic. Practical mitigation in the meantime: prefer
+  a single foreground (blocking) full-suite run over
+  `run_in_background`, since a background run still executing across a
+  turn boundary is exactly what races the automatic Stop hook.
 - The doubled-Voyage-call-per-question design cost (schema + glossary
   each independently embed the same question text) remains unoptimized
-  — accepted, documented in code (`app/pipeline/generate_sql.py`'s
+  -- accepted, documented in code (`app/pipeline/generate_sql.py`'s
   `generate_sql()`), not a blocker.
 - Lint/type tooling (`ruff`, `mypy`) and the test runner (`unittest`, not
-  `pytest`) remain unaddressed, carried over from every prior slice —
+  `pytest`) remain unaddressed, carried over from every prior slice --
   still not blocking.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-When generated SQL fails `validate_sql()` or the real DB execute in
-`get_answer()`, automatically retry exactly once via a new `repair_sql()`
-call (the original question + the failed SQL + the real error fed to the
-LLM) before giving up — per PRD F2's "one automatic repair loop, max 2
-attempts total" and F9's `repair_sql.md` prompt. This closes out M3
-(retrieval + repair + evals) entirely.
+Make the two structurally-racy tests (`test_verify_describe_script.py`'s
+`test_verify_describe_fails_when_a_description_is_missing` and
+`test_glossary_verify_embed.py`'s
+`test_verify_embed_fails_when_a_kb_chunk_is_missing`) safe under
+concurrent full-suite invocation, so the Stop-hook/shared-DB-row hazard
+(3 consecutive sessions now) stops recurring.
 
 Constraints:
-New `prompts/repair_sql.md`, `string.Template`-based like
-`prompts/generate_sql.md` (placeholders for the question, the failed SQL,
-and the real error text). New `repair_sql()` function (exact module
-location — `app/pipeline/generate_sql.py` alongside `call_llm_for_sql()`,
-or a new `app/pipeline/repair_sql.py` — proposed and confirmed at Gate 1)
-reusing the existing `GenerateSqlResponse` Pydantic model (repair also
-produces a single `{"sql": ...}` SELECT) and the existing Anthropic
-client/`require_env` pattern — no new provider, no new response schema.
-`get_answer()` in `app/pipeline/answer.py` gains the retry orchestration:
-on `SqlValidationError` from `validate_sql()` or a real exception from
-`execute_sql()`, call `repair_sql()` once with the concrete error
-message, re-validate and re-execute the repaired SQL; if that also
-fails, propagate the second failure — exactly one repair attempt, never
-a loop-until-success. Must not change `retrieve_relevant_tables()`/
-`retrieve_relevant_glossary_entries()`/`build_schema_context()`/
-`build_glossary_context()`/`generate_sql()`'s own generation behavior,
-and must not change `validate_sql.py`'s/`execute_sql.py`'s validation or
-execution rules themselves — this slice only wires a retry around them.
+Python 3.12, existing `psycopg2`-based connections
+(`app.catalog.sync.connect()`); no new dependency without asking first
+(CLAUDE.md). Both tests must keep proving what they prove today --
+a real subprocess invocation of the actual CLI (`verify_describe`/
+`verify_embed`) genuinely catching a real missing/NULL row, not a
+mocked or weakened assertion (never weaken a test to make it pass, per
+CLAUDE.md). The fix must hold even though each test's mutation has to
+be a real, committed database change (the CLI it shells out to opens
+its own connection, so an uncommitted/rolled-back change would be
+invisible to it -- a plain transaction-rollback fix does not work
+here). The leading candidate (confirm or replace at Gate 1): a Postgres
+session-scoped advisory lock (`pg_advisory_lock`/`pg_advisory_unlock`
+-- built into Postgres, no new dependency) taken around each test's
+delete/null-mutate -> subprocess-check -> restore window, so two
+concurrent invocations of the *same* racy test serialize against each
+other instead of racing. `tests/test_seed_idempotency.py`'s deadlock is
+supporting evidence of overlap, not itself in scope to fix (M1-era,
+unrelated code).
 
 Inputs:
-PRD.md F2 (pipeline step 4: "Validate — see F3. On failure, one automatic
-repair loop, max 2 attempts total"), F3 (validation rules), F9/section 9
-(`repair_sql.md`: "failed SQL + DB error → corrected SELECT");
-`app/pipeline/generate_sql.py` (`GenerateSqlResponse`, `call_llm_for_sql()`
-pattern, `PROMPT_TEMPLATE` convention, `MAX_RETRIES` shape to mirror at
-the repair-attempt-count level); `app/pipeline/validate_sql.py`
-(`SqlValidationError`); `app/pipeline/execute_sql.py`; `app/pipeline/answer.py`
-(`get_answer()`, the exact orchestration point to modify);
-`evals/questions.yaml` + `evals/run.py` (prove no regression from the
-current 6/6).
+`tests/test_verify_describe_script.py:73-109`,
+`tests/test_glossary_verify_embed.py:66-104` (the two racy tests, exact
+line ranges above); `.claude/hooks/stop_verify.py` (confirms the
+automatic-every-turn root cause); `app/catalog/sync.py` (`connect()`,
+the shared psycopg2 connection helper both tests already use);
+this handoff's Open Questions section above (full root-cause diagnosis,
+done this session -- don't re-derive it).
 
 Outputs:
-- `prompts/repair_sql.md`.
-- A new `repair_sql()` function (module confirmed at Gate 1).
-- `get_answer()` gains the one-shot repair-on-failure orchestration
-  described above.
-- Tests: a real, hand-crafted-invalid-SQL + real-error integration test
-  proving `repair_sql()` alone returns a different, validation-passing
-  SELECT (no mocking, per this project's real-infra convention) —
-  mirroring how `validate_sql.py`'s own tests construct real bad SQL
-  rather than mocking sqlglot; an integration test proving `get_answer()`
-  actually invokes the repair path and succeeds when the *first*
-  `generate_sql()` result would fail (this will need a concrete way to
-  force a real, first-attempt failure without mocking — worth discussing
-  explicitly at Gate 1, since `generate_sql()` with retrieval usually
-  produces valid SQL); `evals/run.py`'s score re-reported (still 6/6, or
-  an honestly different number with an explanation).
+Both tests made safe under real concurrent execution (via advisory
+locking, or a Gate-1-confirmed alternative); a new, dedicated
+concurrency-proof script (e.g. `tests/verify_concurrency_safety.py` or
+similar, mirroring this project's existing `verify_*` CLI convention)
+that deliberately launches multiple concurrent subprocess invocations of
+these two test files and asserts every invocation exits 0 -- proving
+the fix under genuine concurrent load, not just "no flake observed this
+run."
 
 Done-check:
-A dedicated repair-path test demonstrates the loop actually fires and
-self-corrects on a real, deliberately invalid SQL + real
-validation/DB error — paste output. Separately, `python -m evals.run`
-exits 0 and reports its score (no regression from 6/6) — paste output.
-Separately, `python -m unittest discover tests` passes in full — paste
-output (expect ~20-30 min real runtime per CLAUDE.md; not hung).
+The new concurrency-proof script exits 0, run fresh, output pasted --
+e.g. `python -m tests.verify_concurrency_safety` (exact command/module
+name confirmed at Gate 1) launching at least 2 concurrent runs of both
+racy test files and reporting every run passed. Separately,
+`python -m unittest discover tests` still passes in full (paste output;
+expect ~20-30 min real runtime per CLAUDE.md -- not hung).
 
 Out-of-scope:
-Changing `generate_sql()`'s/retrieval's own behavior; changing
-`validate_sql.py`'s/`execute_sql.py`'s validation/execution rules
-themselves (only wiring a retry around them); more than one repair
-attempt (no loop-until-success, per PRD's explicit "max 2 attempts
-total"); FastAPI/frontend (M4/M5); CI; fixing the Stop-hook/shared-DB-row
-concurrency hazard noted above (still a real, separate, dedicated slice
-of its own — now overdue).
+`tests/test_seed_idempotency.py`'s own deadlock (M1-era, unrelated
+code -- supporting evidence only); any other test file beyond the two
+named above, even if a similar pattern is spotted (flag it, don't fix
+it silently -- separate slice); FastAPI/frontend (M4, starts after this
+lands); the doubled-Voyage-call design cost; lint/type tooling.
