@@ -39,6 +39,11 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
 - All LLM JSON output goes through a Pydantic model with one retry —
   no scattered json.loads.
 - Secrets in .env (gitignored); .env.example stays current.
+- Any change adding a new Voyage/Anthropic API call site must budget for
+  rate-limit contention (retry attempts, subprocess/hook timeouts) in the
+  same slice — Voyage's free-tier 3 RPM cap has caused real test/build
+  failures in three consecutive slices (embed_text's retry, stop_verify's
+  timeout, and glossary retrieval's doubled per-question call volume).
 
 ## Where things live
 - Method: RUNBOOK.md · Compressed loop: WORKFLOW.md

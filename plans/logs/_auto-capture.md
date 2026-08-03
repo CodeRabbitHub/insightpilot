@@ -715,3 +715,31 @@ Date:   Mon Aug 3 19:12:37 2026 +0530
  tests/test_glossary_verify_embed.py                | 108 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  21 files changed, 1537 insertions(+), 29 deletions(-)
 ```
+
+## Commit at 2026-08-03 19:22
+```
+commit dd3c5616f8f38ba35c345bf12b8176becef2230e
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 19:22:54 2026 +0530
+
+    Add a glossary-driven eval case; unpin two tests' hardcoded 5-question count
+    
+    evals/questions.yaml gains a 6th question (average order value),
+    specifically exercising a KPI whose correct SQL depends on glossary
+    context -- per capture: this slice's own regression (glossary wording
+    leaking into unrelated questions) was only caught by accident, since none
+    of the original 5 questions specifically exercises glossary-informed KPI
+    computation. Ripple effect: two tests hardcoded "exactly 5"/"N/5"
+    assumptions that were always meant to be a floor, not a permanent
+    ceiling, per templates/eval.md's own "start with 5; every production/demo
+    failure adds a case" -- updated to check "at least 5" and "N/M" instead.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ evals/questions.yaml              | 17 +++++++++++++++--
+ plans/logs/_auto-capture.md       | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_eval_questions_yaml.py | 22 +++++++++++++---------
+ tests/test_eval_run_cli.py        | 39 +++++++++++++++++++++++----------------
+ 4 files changed, 97 insertions(+), 27 deletions(-)
+```
