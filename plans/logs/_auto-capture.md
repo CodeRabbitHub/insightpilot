@@ -860,3 +860,185 @@ Date:   Mon Aug 3 23:16:06 2026 +0530
  HANDOFF.md | 310 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------------------------------
  1 file changed, 160 insertions(+), 150 deletions(-)
 ```
+
+## Commit at 2026-08-03 23:16
+```
+commit c20157771def473075ced8f4e04d194a4c6313f4
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Mon Aug 3 23:16:32 2026 +0530
+
+    Roll back Voyage rate-limit padding after empirical retest found no cap
+    
+    A 2026-08-03 retest (10 concurrent voyage-3.5 calls, all 200 OK) found no
+    evidence of the free-tier 3 RPM cap that drove three consecutive slices'
+    worth of defensive padding. Scales it back rather than removing retry
+    entirely -- a real external API call still deserves a real failure path:
+    
+    - app/catalog/embed.py: RATE_LIMIT_MAX_ATTEMPTS 6->2, retry delay 20s->5s
+    - .claude/hooks/stop_verify.py: suite timeout 2400s->600s (real measured
+      solo runtime is 200-250s; 600s keeps ~2.5x margin instead of the ~10x
+      the first revert pass landed on)
+    - tests/_answer_helpers.py, tests/_generate_sql_helpers.py: per-CLI
+      subprocess timeout 450s->120s
+    - CLAUDE.md: removed the "budget for rate-limit contention" standing
+      rule; fixed the documented real test runtime from "~30 min" back to
+      the actual "~5-10 min"
+    
+    Verified via a fresh full suite (190/190) and eval (6/6) run after each
+    round of changes.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ .claude/hooks/stop_verify.py   | 29 +++++++++++++++--------------
+ CLAUDE.md                      | 11 ++---------
+ app/catalog/embed.py           | 26 +++++++++-----------------
+ plans/logs/_auto-capture.md    | 46 ++++++++++++++++++++++++++++++++++++++++++++++
+ tests/_answer_helpers.py       | 15 ++++++---------
+ tests/_generate_sql_helpers.py | 15 ++++++---------
+ 6 files changed, 84 insertions(+), 58 deletions(-)
+```
+
+## Commit at 2026-08-04 01:23
+```
+commit 534ed01d06ddda12c5e9cb14aac911b53c066cfb
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 01:23:38 2026 +0530
+
+    Serialize the two racy verify tests against concurrent full-suite runs
+    
+    test_verify_describe_script.py's and test_glossary_verify_embed.py's
+    mutate-a-shared-row-then-shell-out-to-a-CLI tests could race a second,
+    concurrent unittest discover invocation (e.g. the Stop hook overlapping
+    a manual run) -- recurred across 3 sessions per HANDOFF.md. Each test
+    class now takes a session-scoped Postgres advisory lock in setUpClass,
+    before touching the shared row (including its own setup calls, which
+    would otherwise silently undo a concurrent process's in-progress
+    mutation), and releases it via addClassCleanup rather than
+    tearDownClass, since unittest skips tearDownClass entirely if
+    setUpClass raises -- which would otherwise leak the lock for the rest
+    of that process's life.
+    
+    New tests/verify_concurrency_safety.py proves the fix under real
+    concurrent subprocess load rather than "no flake observed this run."
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ artifacts/reviews/2026-08-03-concurrency-safety.md | 101 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-03-concurrency-safety.md      |  78 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/_pg_helpers.py                               |  24 ++++++++++++++++++++++++
+ tests/test_glossary_verify_embed.py                |  37 ++++++++++++++++++++++++++++++-------
+ tests/test_verify_describe_script.py               |  41 +++++++++++++++++++++++++++++++++--------
+ tests/verify_concurrency_safety.py                 |  83 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 349 insertions(+), 15 deletions(-)
+```
+
+## Commit at 2026-08-04 01:32
+```
+commit 305283fb515b5775ceaa65cb6b8dde5d2b105150
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 01:32:01 2026 +0530
+
+    Capture: concurrency-safety slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-03-concurrency-safety.md | 86 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 86 insertions(+)
+```
+
+## Commit at 2026-08-04 01:32
+```
+commit 8cbc8e60e915043e37d159128053073d6e9cd131
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 01:32:07 2026 +0530
+
+    Handoff: concurrency-safety slice done, next brief is the first FastAPI endpoint
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md | 309 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------------------------------------------------------------------------------------------------
+ 1 file changed, 133 insertions(+), 176 deletions(-)
+```
+
+## Commit at 2026-08-04 09:35
+```
+commit f5f35a26049ba7bd76a7e7960a18d248e99bdc35
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 09:35:01 2026 +0530
+
+    Add POST /api/ask FastAPI endpoint wrapping get_answer()
+    
+    First cut of M4: exposes the existing question -> SQL -> validate ->
+    execute -> repair pipeline over HTTP via a single interim endpoint,
+    transport-only (no pipeline change). Repair-loop or generation failures
+    map to 502, not a crash. Extends test_llm_description_setup.py's
+    dependency ledger for the two newly pre-approved packages (fastapi,
+    uvicorn).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ CLAUDE.md                                            |   3 ++
+ app/main.py                                          |  32 ++++++++++++++++++++
+ artifacts/reviews/2026-08-04-fastapi-ask-endpoint.md | 129 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-04-fastapi-ask-endpoint.md      |  76 ++++++++++++++++++++++++++++++++++++++++++++++++
+ requirements.txt                                     |   2 ++
+ tests/test_api_ask.py                                | 236 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_llm_description_setup.py                  |   6 ++++
+ 7 files changed, 484 insertions(+)
+```
+
+## Commit at 2026-08-04 09:36
+```
+commit fb52aac2015d1f1781c5758948db3f43d85a5cf2
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 09:36:34 2026 +0530
+
+    Capture: fastapi-ask-endpoint slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-04-fastapi-ask-endpoint.md | 81 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 81 insertions(+)
+```
+
+## Commit at 2026-08-04 09:39
+```
+commit 563c83cc02b77ffbfe0a9370c03c6c58204f08c5
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 09:39:33 2026 +0530
+
+    Handoff: fastapi-ask-endpoint slice done, next brief is SSE streaming
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md | 261 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------------------------------------------------------------------------------
+ 1 file changed, 137 insertions(+), 124 deletions(-)
+```
+
+## Commit at 2026-08-04 14:40
+```
+commit 96a43979392d4ab5ac88482b6fdce83db7699969
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 14:40:04 2026 +0530
+
+    Add POST /api/ask/stream SSE endpoint wrapping get_answer()
+    
+    Proves ARCHITECT.md's SSE-not-WebSockets transport decision end-to-end:
+    one hand-rolled StreamingResponse delivering get_answer()'s single
+    eventual outcome as one `result` or `error` SSE event. /api/ask is
+    unchanged; app/pipeline/* is unchanged.
+
+ CLAUDE.md                                                   |   6 ++-
+ app/main.py                                                 |  34 ++++++++++++++++
+ artifacts/reviews/2026-08-04-fastapi-ask-stream-endpoint.md | 121 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-04-fastapi-ask-stream-endpoint.md      |  75 +++++++++++++++++++++++++++++++++++
+ tests/test_api_ask_stream.py                                | 301 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 535 insertions(+), 2 deletions(-)
+```
