@@ -82,6 +82,18 @@ Dead code is a lie about what the program does. Delete it.
 - [ ] Matches the surrounding file's idioms, structure, and naming — not your personal defaults
 - [ ] Uses the project's existing utilities instead of reinventing them
 - [ ] Same error-handling, logging, and import style as its neighbors
+- [ ] An API/SSE response payload is built from a Pydantic model
+      (`response_model=` or `jsonable_encoder(SomeModel(...))`), never a
+      raw dict merge or hand-assembled dict serialized directly — a
+      hand-rolled dict bypasses the shape validation every sibling
+      endpoint gets for free (caught twice: 2026-08-04
+      fastapi-ask-stream-endpoint's first draft streamed `get_answer()`'s
+      output unvalidated instead of routing it through `AskResponse`;
+      2026-08-04 conversations-endpoints' first draft built the SSE
+      result payload via `{**jsonable_encoder(response), "conversation_id":
+      ..., "message_id": ...}` instead of a dedicated result model —
+      caught at the Plan stage before no-slop even ran, but the same
+      pattern)
 
 ## 8. Scope
 

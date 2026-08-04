@@ -1197,3 +1197,52 @@ Date:   Tue Aug 4 20:34:19 2026 +0530
  tests/test_api_ask_persistence.py                                   | 506 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  5 files changed, 769 insertions(+), 1 deletion(-)
 ```
+
+## Commit at 2026-08-04 20:42
+```
+commit 800ca7f544389ba72e61bf940fc01047125c0f8b
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 20:42:02 2026 +0530
+
+    Capture: wire-persistence-into-ask-endpoints slice log
+    
+    Slice log for the persistence-wiring slice (commit 60c0baf), and a new
+    templates/no-slop.md line under category 5: tests against a shared/
+    real-DB table the stop_verify hook can write to concurrently must scope
+    checks to the newest row created or a value distinctive to the test run,
+    never snapshot-then-diff or global-count assertions -- the same
+    underlying concurrency hazard as three prior sessions' Stop-hook fixes,
+    but in test-assertion design rather than hook firing frequency.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-04-wire-persistence-into-ask-endpoints.md | 77 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                                  | 24 ++++++++++++++++++++++++
+ templates/no-slop.md                                         | 10 ++++++++++
+ 3 files changed, 111 insertions(+)
+```
+
+## Commit at 2026-08-04 21:57
+```
+commit 7fa16e72c2ec6bbb0905c66f885c71c939942db1
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 21:57:09 2026 +0530
+
+    Add POST /api/conversations and POST /api/conversations/{id}/messages
+    
+    Enables real multi-turn conversations: a client creates an empty
+    conversation, then posts messages against it, with the pipeline
+    persisting under that same conversation_id and the SSE result event
+    carrying conversation_id/message_id back. The interim /api/ask(/stream)
+    endpoints (always-brand-new-conversation) stay unchanged alongside these.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ app/main.py                                             |  99 ++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-04-conversations-endpoints.md | 121 ++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-04-conversations-endpoints.md      |  92 ++++++++++++++++++++++++++
+ tests/test_api_conversations.py                         | 528 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 840 insertions(+)
+```
