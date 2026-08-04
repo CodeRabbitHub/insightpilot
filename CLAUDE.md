@@ -21,8 +21,10 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
 - Eval: python -m evals.run       (evals/questions.yaml — run after ANY
                                    prompt or pipeline change)
 - API (dev): uvicorn app.main:app --reload
-             (interim POST /api/ask only — see
-             plans/briefs/2026-08-04-fastapi-ask-endpoint.md)
+             (interim POST /api/ask — see
+             plans/briefs/2026-08-04-fastapi-ask-endpoint.md — and
+             POST /api/ask/stream (SSE) — see
+             plans/briefs/2026-08-04-fastapi-ask-stream-endpoint.md)
 - Lint: ruff check . && ruff format .   Types: mypy app
 
 ## Standing rules
