@@ -6,6 +6,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+from app.db.models import Conversation, Message
+from app.db.session import async_session_factory
 from app.pipeline.answer import get_answer
 
 app = FastAPI()
@@ -20,6 +22,35 @@ class AskResponse(BaseModel):
     rows: list[dict[str, Any]]
 
 
+async def _persist_exchange(question: str, response: AskResponse) -> None:
+    """Persist one Conversation plus its user/assistant Message pair
+    through app/db's pool -- called only after get_answer() has already
+    succeeded, never on the failure path. Not wrapped in its own
+    try/except: a write failure here is a real app-DB error, distinct
+    from get_answer()'s 502-mapped pipeline failures, so it is left to
+    surface as an uncaught error rather than being folded into that
+    contract."""
+    async with async_session_factory() as session:
+        conversation = Conversation()
+        session.add(conversation)
+        await session.flush()
+        session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="user",
+                content_json={"question": question},
+            )
+        )
+        session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="assistant",
+                content_json=jsonable_encoder(response),
+            )
+        )
+        await session.commit()
+
+
 @app.post("/api/ask", response_model=AskResponse)
 async def ask(request: AskRequest) -> AskResponse:
     """Interim endpoint -- PRD Sec.8's eventual shape is
@@ -32,7 +63,9 @@ async def ask(request: AskRequest) -> AskResponse:
         sql, rows = await get_answer(request.question)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return AskResponse(sql=sql, rows=rows)
+    response = AskResponse(sql=sql, rows=rows)
+    await _persist_exchange(request.question, response)
+    return response
 
 
 async def _ask_stream_events(question: str):
@@ -51,6 +84,7 @@ async def _ask_stream_events(question: str):
     # validate get_answer()'s output against the same shape rather than
     # this route trusting an unvalidated dict.
     response = AskResponse(sql=sql, rows=rows)
+    await _persist_exchange(question, response)
     payload = json.dumps(jsonable_encoder(response))
     yield f"event: result\ndata: {payload}\n\n"
 

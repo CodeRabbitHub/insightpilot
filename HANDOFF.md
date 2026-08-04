@@ -88,6 +88,19 @@ credential/docstring fixes): `Ran 215 tests in 478.114s / OK`.
 ## Open questions / known issues
 - **This pool is not wired into `/api/ask`/`/api/ask/stream` yet** — the
   next slice, below.
+- **What happens to an already-computed answer when its persistence write
+  fails, once wiring lands (next slice, below):** for `/api/ask`, an
+  uncaught error from the persistence write after a successful
+  `get_answer()` call is a plain 500 (correct — the app DB is owned state,
+  not an upstream being proxied, so 500 beats 502 here). For
+  `/api/ask/stream`, SSE headers are already sent by the time persistence
+  runs, so the same failure truncates the stream silently: neither a
+  `result` nor an `error` event reaches the client, even though the answer
+  was successfully computed. Decided at that slice's Gate 1 to keep this
+  behavior rather than add new error-shape handling to paper over it — not
+  yet decided whether it needs a real fix (e.g. persist before streaming
+  the result event, or a fallback error event if persistence fails after
+  the result event was already queued).
 - **`NullPool` needs re-evaluation once this pool serves live HTTP
   requests** under uvicorn's single persistent event loop, where a real
   pool (e.g. `AsyncAdaptedQueuePool`) may be worth the connection-reuse
