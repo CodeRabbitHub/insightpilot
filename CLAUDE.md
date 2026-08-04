@@ -20,6 +20,9 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
         <!-- switch to pytest AND update stop_verify.py when test deps land -->
 - Eval: python -m evals.run       (evals/questions.yaml — run after ANY
                                    prompt or pipeline change)
+- API (dev): uvicorn app.main:app --reload
+             (interim POST /api/ask only — see
+             plans/briefs/2026-08-04-fastapi-ask-endpoint.md)
 - Lint: ruff check . && ruff format .   Types: mypy app
 
 ## Standing rules

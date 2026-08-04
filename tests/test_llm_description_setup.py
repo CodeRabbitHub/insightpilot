@@ -48,6 +48,12 @@ NEWLY_APPROVED_PACKAGES |= {"voyageai"}
 # pulled in transitively by voyageai, but the brief requires it pinned
 # explicitly in requirements.txt like every other dependency here.
 NEWLY_APPROVED_PACKAGES |= {"pyyaml"}
+# Extended by plans/briefs/2026-08-04-fastapi-ask-endpoint.md: fastapi and
+# uvicorn are a sixth and seventh pre-approved dependency pair
+# (ARCHITECT.md's own "Python 3.12 + FastAPI backend" decision names the
+# stack; this brief is the first slice to actually add them), needed to
+# expose get_answer() over HTTP via the new POST /api/ask endpoint.
+NEWLY_APPROVED_PACKAGES |= {"fastapi", "uvicorn"}
 
 
 def _package_names(text):
