@@ -1,10 +1,12 @@
 import json
+from datetime import datetime
 from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+from sqlalchemy import select
 
 from app.db.models import Conversation, Message
 from app.db.session import async_session_factory
@@ -31,6 +33,26 @@ class ConversationMessageResult(BaseModel):
     message_id: int
     sql: str
     rows: list[dict[str, Any]]
+
+
+class ConversationSummary(BaseModel):
+    id: int
+    title: str | None
+    created_at: datetime
+
+
+class MessageDetail(BaseModel):
+    id: int
+    role: str
+    content_json: dict[str, Any]
+    created_at: datetime
+
+
+class ConversationDetail(BaseModel):
+    id: int
+    title: str | None
+    created_at: datetime
+    messages: list[MessageDetail]
 
 
 async def _persist_exchange(question: str, response: AskResponse) -> None:
@@ -196,4 +218,52 @@ async def post_conversation_message(
     return StreamingResponse(
         _conversation_message_stream_events(conversation_id, request.question),
         media_type="text/event-stream",
+    )
+
+
+@app.get("/api/conversations", response_model=list[ConversationSummary])
+async def list_conversations() -> list[ConversationSummary]:
+    """PRD.md Sec.8's list endpoint -- every conversation, newest first.
+    `id` is included as a tiebreaker alongside `created_at` so ordering
+    stays deterministic even for rows created within the same instant."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Conversation).order_by(
+                Conversation.created_at.desc(), Conversation.id.desc()
+            )
+        )
+        conversations = result.scalars().all()
+    return [
+        ConversationSummary(id=c.id, title=c.title, created_at=c.created_at)
+        for c in conversations
+    ]
+
+
+@app.get("/api/conversations/{conversation_id}", response_model=ConversationDetail)
+async def get_conversation(conversation_id: int) -> ConversationDetail:
+    """PRD.md Sec.8's detail endpoint -- one conversation plus its
+    messages in chronological (oldest-first) order, 404 on an unknown id."""
+    async with async_session_factory() as session:
+        conversation = await session.get(Conversation, conversation_id)
+        if conversation is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        result = await session.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.id)
+        )
+        messages = result.scalars().all()
+    return ConversationDetail(
+        id=conversation.id,
+        title=conversation.title,
+        created_at=conversation.created_at,
+        messages=[
+            MessageDetail(
+                id=m.id,
+                role=m.role,
+                content_json=m.content_json,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ],
     )
