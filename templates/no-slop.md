@@ -60,6 +60,16 @@ Dead code is a lie about what the program does. Delete it.
       validate-sql's check_table_references missed a cross-schema, a
       CTE-masked, a cross-catalog, and a case-folding bypass in
       succession before converging on an allowlist)
+- [ ] A test asserting against a shared/real-DB table the stop_verify
+      hook can write to concurrently (any code-change slice) does not use
+      snapshot-then-diff or global-count assertions ("exactly one new
+      row since I checked") — scope the check to the newest row this call
+      created, or to a value distinctive to this test run, so a
+      concurrently-running suite can't flip the result (rejected at Gate
+      1, 2026-08-04 wire-persistence-into-ask-endpoints, before the
+      unsafe version was ever implemented — related to but distinct from
+      the earlier Stop-hook shared-row-mutation hazard, which was fixed
+      by narrowing when the hook fires, not by changing assertion shape)
 
 ## 6. Comments
 

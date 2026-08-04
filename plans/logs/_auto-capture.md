@@ -1173,3 +1173,27 @@ Date:   Tue Aug 4 17:37:54 2026 +0530
  plans/logs/_auto-capture.md  | 25 +++++++++++++++++++++++++
  3 files changed, 92 insertions(+), 1 deletion(-)
 ```
+
+## Commit at 2026-08-04 20:34
+```
+commit 60c0baf9ced22a3e6e967009efe77c58b19a3177
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 20:34:19 2026 +0530
+
+    Wire /api/ask and /api/ask/stream to persist conversations/messages
+    
+    Each successful request now creates a Conversation plus a user Message
+    (the question) and an assistant Message (the same sql/rows shape
+    returned to the client) through the app-schema pool from the prior
+    slice, on the success path only. Gate record and slice log attached.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md                                                          |  13 ++++
+ app/main.py                                                         |  36 +++++++++-
+ artifacts/reviews/2026-08-04-wire-persistence-into-ask-endpoints.md | 120 ++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-04-wire-persistence-into-ask-endpoints.md      |  95 +++++++++++++++++++++++++
+ tests/test_api_ask_persistence.py                                   | 506 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 769 insertions(+), 1 deletion(-)
+```
