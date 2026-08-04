@@ -1135,3 +1135,41 @@ Date:   Tue Aug 4 17:08:21 2026 +0530
  HANDOFF.md | 310 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------------------------
  1 file changed, 162 insertions(+), 148 deletions(-)
 ```
+
+## Commit at 2026-08-04 17:37
+```
+commit ca028deac0fa2b25f5446e573ae257bb8f9dd1f0
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 17:37:54 2026 +0530
+
+    Fix stop_verify hook re-running the full suite on every turn
+    
+    The Stop event fires on every agent turn, not just ones that touch
+    code -- reviewing a plan, writing a brief, writing a log, or plain
+    conversation all re-ran the ~200-250s real-API test suite for no
+    reason. Skips the run when a content hash of every test-relevant path
+    (app/, tests/, prompts/, alembic/, alembic.ini, requirements.txt)
+    matches the signature recorded the last time the suite was seen to
+    PASS with that exact content.
+    
+    Deliberately keyed to "last known passing state," not "last run" or
+    "last content seen": recording the signature only on a pass means an
+    unchanged turn during an active failing retry loop still re-runs and
+    still enforces the attempt count / circuit breaker exactly as before,
+    since a failing state never matches. Verified live: no marker -> real
+    run (409s); unchanged -> skip (0.3s); a real change -> real run again
+    (559s), not a skip.
+    
+    Also adds .claude/.stop_attempts, .claude/.replan_needed, and the new
+    .claude/.last_verified_signature to .gitignore -- the hook's own
+    docstring already claimed these were gitignored but .gitignore never
+    actually listed them.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ .claude/hooks/stop_verify.py | 65 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ .gitignore                   |  3 +++
+ plans/logs/_auto-capture.md  | 25 +++++++++++++++++++++++++
+ 3 files changed, 92 insertions(+), 1 deletion(-)
+```
