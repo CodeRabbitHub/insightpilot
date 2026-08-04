@@ -1042,3 +1042,71 @@ Date:   Tue Aug 4 14:40:04 2026 +0530
  tests/test_api_ask_stream.py                                | 301 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  5 files changed, 535 insertions(+), 2 deletions(-)
 ```
+
+## Commit at 2026-08-04 14:57
+```
+commit d86e02f03efb838b73791e7a0656f518b132da30
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 14:57:23 2026 +0530
+
+    Capture: fastapi-ask-stream-endpoint slice log
+
+ plans/logs/2026-08-04-fastapi-ask-stream-endpoint.md |  82 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                          | 182 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 264 insertions(+)
+```
+
+## Commit at 2026-08-04 14:57
+```
+commit 3c01f3ca5d6dfe54db4415d82f2f0b6d2586814b
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 14:57:44 2026 +0530
+
+    Handoff: fastapi-ask-stream-endpoint slice done, next brief is app schema persistence foundation
+
+ HANDOFF.md | 269 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------------------------------------------------------------------------------
+ 1 file changed, 142 insertions(+), 127 deletions(-)
+```
+
+## Commit at 2026-08-04 17:05
+```
+commit a120c4ede2f0c09cfb99847942bdf7cb39494ca0
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 17:05:34 2026 +0530
+
+    Add app schema SQLAlchemy async pool, Alembic migration, ORM models
+    
+    Foundation for M4's conversation/message persistence: a second async
+    pool distinct from execute_sql()'s read-only asyncpg pool, authenticated
+    as POSTGRES_USER and scoped to the app schema only (ARCHITECT.md's
+    blast-radius isolation). One hand-written migration creates
+    app.conversations and app.messages alongside the app schema's
+    pre-existing catalog_tables/catalog_columns/kb_chunks tables. Not wired
+    into /api/ask or /api/ask/stream yet -- proven by a direct round-trip
+    test against the pool instead.
+    
+    NullPool is required because asyncpg connections are event-loop-bound
+    and this project's per-test-method event loops (unittest.
+    IsolatedAsyncioTestCase) break a real connection pool across them;
+    flagged in-code to revisit once this pool serves live requests under
+    uvicorn's single persistent loop.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ CLAUDE.md                                                                 |   2 ++
+ alembic.ini                                                               | 151 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ alembic/README                                                            |   1 +
+ alembic/env.py                                                            |  62 ++++++++++++++++++++++++++++++++++++
+ alembic/script.py.mako                                                    |  28 ++++++++++++++++
+ alembic/versions/f2f458dd2525_create_app_schema_conversations_messages.py |  68 +++++++++++++++++++++++++++++++++++++++
+ app/db/__init__.py                                                        |   0
+ app/db/models.py                                                          |  35 ++++++++++++++++++++
+ app/db/session.py                                                         |  39 +++++++++++++++++++++++
+ artifacts/reviews/2026-08-04-app-schema-persistence.md                    | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-04-app-schema-persistence.md                         |  93 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ requirements.txt                                                          |   2 ++
+ tests/test_app_db.py                                                      | 222 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_llm_description_setup.py                                       |   6 ++++
+ 14 files changed, 844 insertions(+)
+```
