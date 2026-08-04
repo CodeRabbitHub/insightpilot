@@ -25,6 +25,8 @@ Requirements: PRD.md · Milestones: PLAN.md · Decisions: ARCHITECT.md
              plans/briefs/2026-08-04-fastapi-ask-endpoint.md — and
              POST /api/ask/stream (SSE) — see
              plans/briefs/2026-08-04-fastapi-ask-stream-endpoint.md)
+- Migrate: alembic upgrade head   (app schema: conversations, messages —
+           see plans/briefs/2026-08-04-app-schema-persistence.md)
 - Lint: ruff check . && ruff format .   Types: mypy app
 
 ## Standing rules

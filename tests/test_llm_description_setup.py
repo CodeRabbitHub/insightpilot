@@ -54,6 +54,12 @@ NEWLY_APPROVED_PACKAGES |= {"pyyaml"}
 # stack; this brief is the first slice to actually add them), needed to
 # expose get_answer() over HTTP via the new POST /api/ask endpoint.
 NEWLY_APPROVED_PACKAGES |= {"fastapi", "uvicorn"}
+# Extended by plans/briefs/2026-08-04-app-schema-persistence.md: sqlalchemy
+# and alembic are an eighth and ninth pre-approved dependency pair
+# (ARCHITECT.md's own "SQLAlchemy read-write pool for `app` only" wording
+# names the stack), added by this slice to build the app-schema
+# persistence foundation (conversations/messages tables + ORM models).
+NEWLY_APPROVED_PACKAGES |= {"sqlalchemy", "alembic"}
 
 
 def _package_names(text):
