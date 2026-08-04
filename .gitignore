@@ -3,3 +3,6 @@ __pycache__/
 .env
 data/*.csv
 .venv/
+.claude/.stop_attempts
+.claude/.replan_needed
+.claude/.last_verified_signature

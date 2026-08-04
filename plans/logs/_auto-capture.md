@@ -1110,3 +1110,28 @@ Date:   Tue Aug 4 17:05:34 2026 +0530
  tests/test_llm_description_setup.py                                       |   6 ++++
  14 files changed, 844 insertions(+)
 ```
+
+## Commit at 2026-08-04 17:06
+```
+commit 4d922ee34bd436ef3647a9954e08ffd6454b56f6
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 17:06:24 2026 +0530
+
+    Capture: app-schema-persistence slice log
+
+ plans/logs/2026-08-04-app-schema-persistence.md | 88 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                     | 68 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 156 insertions(+)
+```
+
+## Commit at 2026-08-04 17:08
+```
+commit 3328719d1a4ff05a83089c5871148920146801bd
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 17:08:21 2026 +0530
+
+    Handoff: app-schema-persistence slice done, next brief is wiring persistence into the endpoints
+
+ HANDOFF.md | 310 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------------------------
+ 1 file changed, 162 insertions(+), 148 deletions(-)
+```
