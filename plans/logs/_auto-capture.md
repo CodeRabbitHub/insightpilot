@@ -1331,3 +1331,88 @@ Date:   Wed Aug 5 11:42:49 2026 +0530
  plans/logs/_auto-capture.md                           | 64 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  2 files changed, 122 insertions(+)
 ```
+
+## Commit at 2026-08-05 11:45
+```
+commit 34dcb613a2c7aaa318a9e7ad6e243cadcedae4d3
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 11:45:33 2026 +0530
+
+    Handoff: conversations-read-endpoints slice done, next brief is React/Vite scaffold
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md                  | 318 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------------------
+ plans/logs/_auto-capture.md |  21 ++++++++++++
+ 2 files changed, 183 insertions(+), 156 deletions(-)
+```
+
+## Commit at 2026-08-05 12:36
+```
+commit 21add48a47528f2b7cb9802571d2068c1dfae58c
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 12:36:18 2026 +0530
+
+    Add React/Vite/Tailwind scaffold with conversations list/detail page
+    
+    Stands up web/ (React 18 + Vite + TS + Tailwind 3, pinned to match
+    ARCHITECT.md's stack decision after `npm create vite` defaulted to
+    React 19/Tailwind v4) with one page proving the read-only conversation
+    API end-to-end in a browser: list via GET /api/conversations, click
+    through to detail via GET /api/conversations/{id}. Adds CORSMiddleware
+    to app/main.py scoped to the Vite dev origin.
+    
+    Also fixes a hook bug surfaced mid-session: running npm install inside
+    web/ shifted the shared shell cwd, breaking the Bash/PowerShell hooks'
+    relative script path. Hook commands now resolve the repo root via
+    `git rev-parse --show-toplevel`, and capture_commit.py guards that
+    call the same way its neighboring git call already was.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ .claude/hooks/capture_commit.py                     |   11 +-
+ .claude/settings.json                               |    6 +-
+ app/main.py                                         |    8 +
+ artifacts/design/2026-08-05-react-vite-scaffold.md  |   50 ++++
+ artifacts/reviews/2026-08-05-react-vite-scaffold.md |  173 +++++++++++++
+ plans/briefs/2026-08-05-react-vite-scaffold.md      |   86 +++++++
+ web/.gitignore                                      |   24 ++
+ web/README.md                                       |   11 +
+ web/index.html                                      |   13 +
+ web/package-lock.json                               | 2054 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/package.json                                    |   26 ++
+ web/postcss.config.js                               |    6 +
+ web/public/favicon.svg                              |    1 +
+ web/src/App.tsx                                     |  146 +++++++++++
+ web/src/api.ts                                      |   37 +++
+ web/src/index.css                                   |    3 +
+ web/src/main.tsx                                    |   10 +
+ web/tailwind.config.js                              |    9 +
+ web/tsconfig.app.json                               |   27 ++
+ web/tsconfig.json                                   |    7 +
+ web/tsconfig.node.json                              |   24 ++
+ web/vite.config.ts                                  |    7 +
+ 22 files changed, 2735 insertions(+), 4 deletions(-)
+```
+
+## Commit at 2026-08-05 12:37
+```
+commit 92bf2058ace864908c863b5158ee76f05f8e97e2
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 12:37:34 2026 +0530
+
+    Capture: react-vite-scaffold slice log
+    
+    Slice log for the react-vite-scaffold slice (commit 21add48): one
+    thing rejected/changed (npm create vite defaulted to React 19/Tailwind
+    v4, off ARCHITECT.md's pinned stack; pinned back to 18/v3), first
+    occurrence so no promotion yet.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-05-react-vite-scaffold.md | 76 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 76 insertions(+)
+```
