@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/danger_block.py"
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/danger_block.py\""
           }
         ]
       }
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/capture_commit.py"
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/capture_commit.py\""
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python .claude/hooks/stop_verify.py"
+            "command": "python \"$(git rev-parse --show-toplevel)/.claude/hooks/stop_verify.py\""
           }
         ]
       }

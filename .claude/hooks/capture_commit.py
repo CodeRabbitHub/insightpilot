@@ -26,7 +26,16 @@ def main() -> int:
         return 0
     if not info.strip():
         return 0
-    log_dir = pathlib.Path("plans/logs")
+    try:
+        toplevel = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout.strip()
+    except Exception:
+        return 0
+    if not toplevel:
+        return 0
+    log_dir = pathlib.Path(toplevel) / "plans/logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
     with (log_dir / "_auto-capture.md").open("a", encoding="utf-8") as fh:
