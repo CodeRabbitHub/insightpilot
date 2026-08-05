@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
+  asAssistantContent,
   fetchConversation,
   fetchConversations,
   postConversationMessage,
   type ConversationDetail,
   type ConversationSummary,
+  type MessageDetail,
 } from './api'
+import { ChartView } from './components/ChartView'
 
 function formatTimestamp(iso: string): string {
   return new Date(iso).toLocaleString()
@@ -14,6 +17,12 @@ function formatTimestamp(iso: string): string {
 
 function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
+}
+
+function AssistantChart({ message }: { message: MessageDetail }) {
+  const content = asAssistantContent(message.content_json)
+  if (!content) return null
+  return <ChartView chartSpec={content.chartSpec} rows={content.rows} />
 }
 
 function ConversationList({
@@ -98,6 +107,7 @@ function ConversationDetailView({
             <pre className="overflow-x-auto whitespace-pre-wrap text-sm">
               {JSON.stringify(m.content_json, null, 2)}
             </pre>
+            {m.role === 'assistant' && <AssistantChart message={m} />}
           </li>
         ))}
       </ul>

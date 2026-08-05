@@ -36,11 +36,43 @@ export async function fetchConversation(id: number): Promise<ConversationDetail>
   return response.json()
 }
 
+export interface Analysis {
+  summary: string
+  explanation: string
+  chart_spec: Record<string, unknown>
+  follow_ups: string[]
+}
+
 export interface ConversationMessageResult {
   conversation_id: number
   message_id: number
   sql: string
   rows: Record<string, unknown>[]
+  analysis: Analysis
+}
+
+export interface AssistantContent {
+  rows: Record<string, unknown>[]
+  chartSpec: Record<string, unknown>
+}
+
+// content_json holds {question} for user messages and {sql, rows, analysis}
+// for assistant ones, so MessageDetail can't type it narrower -- this is the
+// one runtime check that a given message actually has the shape ChartView
+// needs, before ChartView does its own bar-specific resolution.
+export function asAssistantContent(
+  contentJson: Record<string, unknown>,
+): AssistantContent | null {
+  const rows = contentJson.rows
+  const analysis = contentJson.analysis
+  if (!Array.isArray(rows)) return null
+  if (typeof analysis !== 'object' || analysis === null) return null
+  const chartSpec = (analysis as Record<string, unknown>).chart_spec
+  if (typeof chartSpec !== 'object' || chartSpec === null) return null
+  return {
+    rows: rows as Record<string, unknown>[],
+    chartSpec: chartSpec as Record<string, unknown>,
+  }
 }
 
 export async function postConversationMessage(
