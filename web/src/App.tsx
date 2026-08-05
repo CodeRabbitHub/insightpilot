@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import type { FormEvent } from 'react'
 import {
   fetchConversation,
   fetchConversations,
+  postConversationMessage,
   type ConversationDetail,
   type ConversationSummary,
 } from './api'
@@ -47,10 +49,31 @@ function ConversationList({
 function ConversationDetailView({
   conversation,
   onBack,
+  onMessageSent,
 }: {
   conversation: ConversationDetail
   onBack: () => void
+  onMessageSent: () => void
 }) {
+  const [question, setQuestion] = useState('')
+  const [sending, setSending] = useState(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    const trimmed = question.trim()
+    if (trimmed === '' || sending) return
+    setSending(true)
+    setSendError(null)
+    postConversationMessage(conversation.id, trimmed)
+      .then(() => {
+        setQuestion('')
+        onMessageSent()
+      })
+      .catch((err: unknown) => setSendError(errorMessage(err)))
+      .finally(() => setSending(false))
+  }
+
   return (
     <div>
       <button
@@ -78,6 +101,26 @@ function ConversationDetailView({
           </li>
         ))}
       </ul>
+      <form onSubmit={handleSubmit} className="mt-4 flex gap-2">
+        <input
+          type="text"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          disabled={sending}
+          placeholder="Ask a question…"
+          className="flex-1 rounded border border-gray-300 px-3 py-2 text-sm"
+        />
+        <button
+          type="submit"
+          disabled={sending || question.trim() === ''}
+          className="rounded bg-blue-600 px-4 py-2 text-sm text-white disabled:opacity-50"
+        >
+          {sending ? 'Sending…' : 'Send'}
+        </button>
+      </form>
+      {sendError && (
+        <p className="mt-2 text-sm text-red-600">Error: {sendError}</p>
+      )}
     </div>
   )
 }
@@ -89,6 +132,7 @@ function App() {
     useState<ConversationDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
     setLoading(true)
@@ -120,12 +164,14 @@ function App() {
     return () => {
       stale = true
     }
-  }, [selectedId])
+  }, [selectedId, refreshKey])
 
   return (
     <div className="mx-auto max-w-2xl p-6">
       <h1 className="mb-4 text-2xl font-bold">InsightPilot conversations</h1>
-      {loading && <p className="text-gray-500">Loading…</p>}
+      {loading && !selectedConversation && (
+        <p className="text-gray-500">Loading…</p>
+      )}
       {error && <p className="text-red-600">Error: {error}</p>}
       {!loading && !error && selectedId === null && (
         <ConversationList
@@ -133,10 +179,11 @@ function App() {
           onSelect={setSelectedId}
         />
       )}
-      {!loading && !error && selectedId !== null && selectedConversation && (
+      {selectedId !== null && selectedConversation && (
         <ConversationDetailView
           conversation={selectedConversation}
           onBack={() => setSelectedId(null)}
+          onMessageSent={() => setRefreshKey((k) => k + 1)}
         />
       )}
     </div>
