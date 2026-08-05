@@ -1,136 +1,109 @@
 # Handoff
 
 Date: 2026-08-06
-Slice just completed: plans/briefs/2026-08-06-chart-view.md
-  + plans/logs/2026-08-06-chart-view.md
-  (commits ac7791a, add6707)
+Slice just completed: plans/briefs/2026-08-06-sql-explanation-viewer.md
+  + plans/logs/2026-08-06-sql-explanation-viewer.md
+  (commit 865d30d)
 
 ## State of the work
 
-- **The chat UI renders a real ECharts bar chart beneath chartable
-  assistant messages.** New `web/src/components/ChartView.tsx` takes
-  `chartSpec`/`rows` and renders one bar chart, or `null`, based purely
-  on whether the shape resolves to a recognized bar chart — never a
-  guessed axis, never an error for anything else.
-- **`chart_spec` resolution is now known to need at least these real
-  key-name aliases** (all confirmed against live, already-persisted
-  data, not hypothetical): type discriminator as `chart_type` OR `type`,
-  checked against exactly `'bar'`; x-field as `x` OR `x_field`; y-field
-  as `y` OR `y_field`. Everything that doesn't resolve renders nothing —
-  this includes two more real non-bar shapes seen this session on top of
-  the ones named in the brief: `{"chart_type":"none","reason":...}` and,
-  newly observed during this slice's own gate run, `{"type":"scalar",
-  "value":96478,"value_field":"delivered_order_count"}`. The component
-  handled the scalar shape correctly without ever needing to recognize
-  `"scalar"` specifically — the strict `=== 'bar'` check is what made
-  that safe.
-- **`web/src/api.ts` gained `Analysis`, `ConversationMessageResult.
-  analysis`, and `asAssistantContent()`** — a small runtime shape-check
-  that returns `{rows, chartSpec}` or `null` given a message's
-  `content_json`, since `content_json` still holds either a user
-  question or an assistant answer and can't be typed narrower at the
-  field level. Confirmed it degrades safely for the pre-`analysis`-field
-  legacy messages already in the DB (`typeof analysis !== 'object'`
-  catches `undefined`, returns `null`, renders nothing extra for them).
-- **`web/src/App.tsx`'s message loop** now renders a new `AssistantChart`
-  helper alongside (not replacing) the existing raw JSON `<pre>` dump,
-  for `role === 'assistant'` messages only.
+- **Every assistant chat message now has a collapsed "View SQL" section**
+  beneath it (alongside the existing chart and raw JSON dump), rendered by
+  new `web/src/components/SqlDetails.tsx` — a native `<details>/<summary>`
+  element, collapsed by default, revealing the real executed `sql` (in a
+  `<pre>`, matching the existing raw-dump styling) and
+  `analysis.explanation` (plain text) on click.
+- **`web/src/api.ts`'s `AssistantContent`/`asAssistantContent()`** now
+  also expose `sql` (top-level `content_json` key) and
+  `analysis.explanation`, using the same guard-clause style already there
+  for `rows`/`chart_spec` — returns `null` (renders nothing extra) for any
+  message missing either, which includes every pre-`sql`-field legacy
+  message already in the DB.
+- **`web/src/App.tsx`'s message loop** renders both the chart and the SQL
+  section through a single `AssistantResult` helper (resolves
+  `asAssistantContent` once per message) — this replaces the two
+  near-identical `AssistantChart`/`AssistantSql` helpers the brief
+  originally suggested; the no-slop pass caught the duplication before
+  commit and it was collapsed into one, re-verified with a fresh build
+  and a fresh live Playwright run afterward (behavior unchanged).
 - **Gate 2 all five checks green** (full record:
-  `artifacts/reviews/2026-08-06-chart-view.md`). One real no-slop finding
-  caught and fixed: the initial draft only checked `chart_type`, missing
-  a real `type`-keyed bar variant already sitting in the live DB
-  (message id 462) for this brief's own done-check question — found by
-  directly querying the DB, not just trusting a claim. Fixed by
-  resolving the type discriminator the same alias-first way the x/y
-  field names already were.
-- **Dependencies**: `echarts` + `echarts-for-react` added to
-  `web/package.json` (pre-approved, named in ARCHITECT.md's stack) — the
-  first new frontend dependencies since the scaffold.
-- **First `web/src/components/` file.** No routing library, no
-  shadcn/ui, no dark mode added — all still deferred, same as every
-  prior frontend slice.
-- **The "View SQL"/explanation section and follow-up chips are still
-  untouched** — `analysis.explanation`, `analysis.follow_ups`, and `sql`
-  are all already present in every real `content_json` this slice's own
-  proof observed, just not rendered anywhere yet. This is exactly the
-  next slice (below).
+  `artifacts/reviews/2026-08-06-sql-explanation-viewer.md`). Two real
+  no-slop findings caught and fixed: a stale comment (said the shape
+  check existed only for `ChartView`'s benefit, no longer true) and the
+  duplicated-helper pattern above.
+- **No new dependencies.** `<details>` was chosen over a
+  `useState`-driven toggle specifically because the codebase has no
+  `useState` used for pure view-state anywhere yet (design note:
+  `artifacts/design/2026-08-06-sql-explanation-viewer.md`).
+- **No backend changes** — confirmed via `git diff --stat -- app prompts`
+  being empty for this slice.
 
 ## Proof
 
 ```
 $ cd web && npm run build
-> web@0.0.0 build
-> tsc -b && vite build
-vite v8.2.0 building client environment for production...
-transforming...✓ 625 modules transformed.
-rendering chunks...
-computing gzip size...
-dist/index.html                     0.46 kB │ gzip:   0.29 kB
-dist/assets/index-D7gtQICa.js   1,282.56 kB │ gzip: 425.02 kB
-✓ built in 4.79s
+✓ 626 modules transformed.
+✓ built in 2.00s
 ```
 
-Live shipping proof (real backend, real Postgres + Anthropic, real Vite
-dev server, real headless Chromium via Playwright, driven through the
-actual chat UI against a fresh conversation, `POST /api/conversations` →
-id 391):
+Live Playwright proof (real backend, real Postgres, real Vite dev
+server, real headless Chromium, driven through the actual chat UI
+against fresh conversations):
 
-"What are the top 5 product categories by number of orders?" →
-`chart_spec: {"x":"product_category_name","y":"order_count",
-"chart_type":"bar","orientation":"vertical","title":"Top 5 Product
-Categories by Number of Orders"}` → a correctly rendered 5-bar chart
-(all real category names and counts), screenshot captured.
-
-"How many orders have the status 'delivered'?" (same conversation) →
-`chart_spec: {"type":"scalar","value":96478,
-"value_field":"delivered_order_count"}` → no chart rendered:
+Conversation 392 — "How many orders have the status 'delivered'?" →
+collapsed by default (`openBefore: false`), click reveals the real SQL
+and explanation:
 ```
 {
-  "canvasCountAfterFirst": 1,
-  "canvasCountAfterSecond": 1,
+  "openBefore": false,
+  "preTextBefore": 1,
+  "openAfter": true,
+  "sqlText": "SELECT COUNT(*) FROM olist.orders WHERE order_status = 'delivered'",
+  "explanationText": "The query counted all rows in olist.orders where order_status equals 'delivered', returning a single scalar value of 96,478. This directly answers the question by giving the total count of delivered orders in the dataset.",
   "consoleErrors": []
 }
 ```
-Zero browser console errors across both questions. Vite dev server
-(port 5173) stopped after verification, confirmed free via `netstat`.
+
+Conversation 393 — "What are the top 5 product categories by number of
+orders?" → confirms the SQL section coexists correctly with a real
+rendered bar chart:
+```
+{ "canvasCount": 1, "summaryCount": 1, "consoleErrors": [] }
+```
+
+Dev server stopped after verification, confirmed free via `netstat`.
 
 ## Open questions / known issues
 
-- **`chart_spec` has at least 4 real observed shapes now** (see State of
-  the work above) — still no fixed schema by design
-  (`prompts/analyze.md`), and tightening it there remains explicitly
-  deferred, same as the previous handoff's decision. `ChartView.tsx`'s
-  alias-resolution approach is the frontend's answer to this for now;
-  if a *second* logged correction of the "LLM picks a different JSON key
-  for the same discriminator" pattern shows up in a future slice (this
-  session's `chart_type`/`type` fix was the first), promote a standing
-  rule to CLAUDE.md/no-slop.md per the ratchet.
-- **ECharts auto-hides overlapping x-axis category labels** when there
-  isn't enough width for all of them (observed: only 3 of 5 category
-  labels shown for the 5-category proof chart, in the ~672px-wide
-  `max-w-2xl` container) — this is ECharts' own default `axisLabel`
-  interval behavior, not a bug, and the tooltip still shows the full
-  category name on hover. Not addressed this slice; revisit only if a
-  future slice needs every label always visible (e.g. rotating labels or
-  widening the container).
-- **No charting library styling beyond a single fixed accent color and
-  the dataviz skill's minimum bar/gridline/tooltip spec** — no legend
-  (correct, single series), no dark mode (nothing else in this app has
-  one yet), no table-view toggle (the existing raw `<pre>` dump already
-  covers that fallback). All deliberate, documented in
-  `artifacts/design/2026-08-06-chart-view.md`.
-- **`web/src/App.tsx` has no per-field message rendering for
-  `sql`/`explanation`/`follow_ups` yet** — only the raw `<pre>` dump and,
-  as of this slice, the chart. The next slice (below) starts on this.
+- **Frontend unit tests exist but cannot execute.**
+  `web/tests/api.asAssistantContent.test.ts` and
+  `web/tests/SqlDetails.test.tsx` were written by the test-writer subagent
+  from this slice's brief, but `web/package.json` still has no test
+  runner (vitest/jest) — a pre-existing gap, not fixed this slice (adding
+  one is a new dependency). Intended command once installed:
+  `cd web && npx vitest run`.
+- **`AssistantResult` is now the single per-message resolution point** for
+  both the chart and the SQL section. The next slice (follow-up chips)
+  will extend it a third time — if a *third* near-identical prop-drilling
+  need shows up after that, consider whether `AssistantResult` should grow
+  a proper props contract rather than accreting one-off additions.
 - Carried over, unchanged from the previous handoff (still true, still
   unaddressed):
-  - Decimal-valued rows still serialize as JSON strings, not numbers —
-    `ChartView.tsx`'s `toFiniteNumber()` already copes with this for
-    y-values, but it remains true elsewhere (e.g. the raw `<pre>` dump).
+  - `chart_spec` still has no fixed schema by design (`prompts/analyze.md`);
+    `ChartView.tsx`'s alias-resolution approach remains the frontend's
+    answer to this.
+  - ECharts auto-hides overlapping x-axis category labels under the
+    `max-w-2xl` container width — not a bug, tooltip still shows full
+    names, unaddressed by design.
+  - No charting library styling beyond a single fixed accent color; no
+    dark mode; no table-view toggle (raw `<pre>` dump covers it).
+  - Decimal-valued rows still serialize as JSON strings, not numbers, in
+    the raw `<pre>` dump (handled only where `ChartView.tsx`'s
+    `toFiniteNumber()` already copes with it).
   - `NullPool` needs re-evaluation under uvicorn's single persistent
     event loop — still flagged in `app/db/session.py`'s own comment.
-  - What happens to an already-computed answer when its persistence
-    write fails: still a plain 500 / silently truncated SSE stream.
+  - What happens to an already-computed answer when its persistence write
+    fails: still a plain 500 / silently truncated SSE stream.
   - `plans/logs/_auto-capture.md` remains silently uncommitted across
     every commit (pre-existing workflow gap, by design of the capture
     hook's timing).
@@ -138,15 +111,11 @@ Zero browser console errors across both questions. Vite dev server
     (M1-era, unrelated code) remains uninvestigated.
   - Lint/type tooling on the Python side (`ruff`, `mypy`) remains
     unaddressed.
-  - A `response.content[0].text`/`ThinkingBlock` bug pattern is fixed
-    only in `analyze_answer.py`; `generate_sql.py`, `repair_sql.py`,
-    `describe.py` still carry the same fragile assumption. Still only
-    one documented fixed occurrence; promote a shared
-    `extract_response_text()` helper if it recurs.
-  - The project's own `.venv` (Python 3.11.15) must be used explicitly
-    for backend commands.
-  - No frontend test runner exists — live CDP/Playwright verification
-    stands in for it at Gate 2, for frontend-touching slices only.
+  - A `response.content[0].text`/`ThinkingBlock` bug pattern is fixed only
+    in `analyze_answer.py`; `generate_sql.py`, `repair_sql.py`,
+    `describe.py` still carry the same fragile assumption.
+  - The project's own `.venv` (Python 3.11.15) must be used explicitly for
+    backend commands.
   - API base URL is a hardcoded `http://localhost:8000` constant in
     `web/src/api.ts`.
   - `Conversation`'s `user_id` FK to `users` is deliberately omitted —
@@ -155,65 +124,61 @@ Zero browser console errors across both questions. Vite dev server
 ## Next slice (the brief, written NOW while context is hot)
 
 Goal:
-Render `analysis.explanation` and the executed `sql` in a collapsed
-"View SQL" section beneath each assistant message, expandable on click,
-using data already flowing through `content_json` (no backend change).
+Render `analysis.follow_ups` as clickable chip buttons beneath each
+assistant message; clicking a chip populates the compose input with that
+follow-up's text (does not auto-submit).
 
 Constraints:
-- Follow-up chips are a separate, later slice (see Out-of-scope) — this
-  slice is exactly the SQL/explanation section, one outcome.
 - No new dependencies. Follow established frontend conventions: Tailwind
   utility classes inline, plain function components with
-  inline-destructured typed props, local component state (no new
-  state-management library) — same pattern `ChartView.tsx` and
-  `AssistantChart` already use for per-message rendering.
-- Reuse `asAssistantContent()` (`web/src/api.ts`) for the runtime shape
-  check rather than re-deriving one; it currently returns `{rows,
-  chartSpec}` and will need `sql`/`explanation` added to its return
-  shape (or a second small accessor) since those are the two new fields
-  this slice needs from `content_json`.
-- Collapsed by default; a click reveals both the SQL (in a `<pre>`,
-  monospace, matching the existing raw-dump styling already used
-  elsewhere in `App.tsx`) and `analysis.explanation` as plain text.
+  inline-destructured typed props, local component state — same pattern
+  `ChartView.tsx`/`SqlDetails.tsx` and `AssistantResult` (`App.tsx`)
+  already use for per-message rendering.
+- Do not auto-submit on click — the user must still be able to edit the
+  populated text and press Send, same as typing it manually. Reuse
+  `ConversationDetailView`'s existing `question`/`setQuestion` state
+  (`App.tsx`) as the target; do not introduce a second state store for
+  the compose input.
 - No backend changes. Do not touch `analyze_answer.py`,
   `prompts/analyze.md`, `AnalyzeResponse`, or any endpoint in
   `app/main.py`.
+- Render exactly what `analysis.follow_ups` contains — no deduplication,
+  no capping the number shown, no reordering.
 
 Inputs:
-- `web/src/api.ts`'s `asAssistantContent()` and `Analysis` interface
-  (`{summary, explanation, chart_spec, follow_ups}`) — the exact fields
-  already available per message, just not yet rendered beyond
-  `chart_spec`.
-- `web/src/components/ChartView.tsx` and `web/src/App.tsx`'s
-  `AssistantChart` helper (`App.tsx`, near the message-rendering loop)
-  as the established pattern for a small per-message component gated on
-  `role === 'assistant'`.
-- A real assistant message's full shape (this handoff's own Proof above,
-  or any row in `app.messages` — e.g. `sql: "SELECT ..."`,
-  `analysis.explanation: "The query joined..."`) as ground truth for
-  what's actually available to render.
+- `web/src/api.ts`'s `Analysis` interface already declares
+  `follow_ups: string[]`; `AssistantContent`/`asAssistantContent()` need
+  it added the same way `sql`/`explanation` were added this slice (same
+  guard-clause style — `Array.isArray`, consistent with the existing
+  `rows` check's looseness on element validation).
+- `web/src/components/SqlDetails.tsx` and `App.tsx`'s `AssistantResult`
+  helper as the established per-message-component pattern — note
+  `AssistantResult` currently only takes `{ message }`; this slice will
+  need it (or a caller one level up) to also receive a callback into
+  `ConversationDetailView`'s `setQuestion`, since chip clicks must reach
+  state that currently lives one component above `AssistantResult`.
+- A real assistant message's `analysis.follow_ups` array (this handoff's
+  own Proof above shows real question text if re-run; any row in
+  `app.messages` has real examples) as ground truth for what's actually
+  available to render.
 
 Outputs:
-- `web/src/api.ts`: `asAssistantContent()` (or a small sibling accessor)
-  exposes `sql` and `analysis.explanation` alongside the existing
-  `rows`/`chartSpec`.
-- New `web/src/components/SqlDetails.tsx` (or equivalent): a collapsed-
-  by-default `<details>`/toggle-button section showing the SQL and
-  explanation for one assistant message.
-- `web/src/App.tsx`'s message loop renders it alongside `ChartView` and
-  the existing raw JSON dump — nothing removed.
+- `web/src/api.ts`: `AssistantContent` gains `followUps: string[]`.
+- New `web/src/components/FollowUpChips.tsx` (or equivalent): renders one
+  button per follow-up string; `onSelect(text: string)` prop fires on
+  click.
+- `web/src/App.tsx`: `AssistantResult` (or its caller) wires
+  `FollowUpChips`'s `onSelect` through to `ConversationDetailView`'s
+  `setQuestion`.
 
 Done-check:
 Start the dev server (`docker compose up` or `npm run dev` + the API),
-ask a real question through the chat UI, screenshot (via Playwright,
-same as this slice) the message showing the section collapsed by
-default, then click to expand it and screenshot showing the real SQL
-and explanation text revealed.
+ask a real question through the chat UI, screenshot the chips rendered
+with real follow-up text beneath the message, click one, screenshot the
+compose input now populated with that exact text (not yet sent).
 
 Out-of-scope:
-- Follow-up chips (`analysis.follow_ups` rendered as clickable buttons
-  that populate the compose input) — separate next-next slice.
-- Any chart-rendering change (`ChartView.tsx` stays as-is).
+- Auto-submitting a follow-up on click.
+- Any change to `SqlDetails.tsx` or `ChartView.tsx`.
 - Any backend change.
-- Syntax highlighting for the SQL — plain `<pre>` text is enough for
-  this slice, matching the existing raw-dump convention.
+- Deduplicating, capping, or reordering the follow-ups list.
