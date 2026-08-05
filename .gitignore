@@ -6,3 +6,4 @@ data/*.csv
 .claude/.stop_attempts
 .claude/.replan_needed
 .claude/.last_verified_signature
+.claude/.suite_lock

@@ -19,13 +19,15 @@ watched content matches an already-*verified* state gets skipped.
 
 Exit 2 = the agent is not allowed to stop; stderr tells it why.
 State files (gitignored): .claude/.stop_attempts, .claude/.replan_needed,
-.claude/.last_verified_signature
+.claude/.last_verified_signature, .claude/.suite_lock
 """
 import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import sys
+import time
 
 # sys.executable is whatever interpreter launched this hook, which may be
 # an isolated harness venv with none of the project's dependencies
@@ -41,6 +43,35 @@ MAX_ATTEMPTS = 3
 ATTEMPTS = pathlib.Path(".claude/.stop_attempts")
 REPLAN = pathlib.Path(".claude/.replan_needed")
 LAST_VERIFIED = pathlib.Path(".claude/.last_verified_signature")
+
+# A second full-suite run (this hook firing twice in close succession, or
+# a manual `python -m unittest discover tests` left running across a turn
+# boundary) races this one against the same live Postgres DB and can
+# permanently corrupt a row an integration test mutates-then-restores in a
+# `finally` (e.g. test_catalog_sync.py's preserve-description test) --
+# hit twice in real sessions (2026-08-03 repair-loop, 2026-08-05
+# wire-analyze-answer). SUITE_LOCK makes that race structurally
+# impossible for this hook's own runs; a stale lock (older than the
+# subprocess timeout plus margin -- i.e. abandoned by a crashed/killed
+# prior run, never released) is reclaimed rather than left blocking
+# forever.
+SUITE_LOCK = pathlib.Path(".claude/.suite_lock")
+SUITE_LOCK_STALE_SECONDS = 1300
+
+
+def _acquire_suite_lock() -> bool:
+    if SUITE_LOCK.exists():
+        age = time.time() - SUITE_LOCK.stat().st_mtime
+        if age < SUITE_LOCK_STALE_SECONDS:
+            return False
+        SUITE_LOCK.unlink(missing_ok=True)  # abandoned by a crashed/killed run
+    SUITE_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(SUITE_LOCK), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+        return True
+    except FileExistsError:
+        return False
 
 # Paths whose content can change what the suite does or how it behaves.
 # plans/, HANDOFF.md, artifacts/, and other brief/log/handoff bookkeeping
@@ -96,6 +127,13 @@ def main() -> int:
         # it (a plan, a brief, a log, conversation).
         return 0
 
+    if not _acquire_suite_lock():
+        # Another full-suite run (this hook or a manual one) already holds
+        # the lock -- skip rather than race it against the same live DB.
+        # This turn's Stop simply isn't verified; the next turn re-checks
+        # (the signature still won't match until a run actually passes).
+        return 0
+
     try:
         # 1200s: the wire-analyze-answer slice (2026-08-05) made get_answer()
         # unconditionally run one more real Anthropic call per question,
@@ -110,11 +148,14 @@ def main() -> int:
         # the row for every later test run until someone notices and
         # repairs it by hand. 1200s keeps real margin over the new measured
         # runtime while still catching a genuine hang in ~20 minutes.
-        result = subprocess.run(
-            TEST_CMD, capture_output=True, text=True, timeout=1200
-        )
-    except Exception:
-        return 0
+        try:
+            result = subprocess.run(
+                TEST_CMD, capture_output=True, text=True, timeout=1200
+            )
+        except Exception:
+            return 0
+    finally:
+        SUITE_LOCK.unlink(missing_ok=True)
 
     if result.returncode == 0:
         ATTEMPTS.unlink(missing_ok=True)
