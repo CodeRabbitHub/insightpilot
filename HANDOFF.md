@@ -1,140 +1,121 @@
 # Handoff
 
 Date: 2026-08-05
-Slice just completed: plans/briefs/2026-08-05-message-composing.md
-  + plans/logs/2026-08-05-message-composing.md
-  (commits b05c795, a68b74e)
+Slice just completed: plans/briefs/2026-08-05-analyze-answer.md
+  + plans/logs/2026-08-05-analyze-answer.md
+  (commits 027a7cf, 5d0f5f6)
 
 ## State of the work
-- **The frontend's write path now works end-to-end in a real browser.**
-  `web/src/api.ts` gained `postConversationMessage(conversationId,
-  question)`: POSTs to `/api/conversations/{id}/messages`, drains the
-  endpoint's single-event SSE response (buffers to `done`, then parses the
-  one `event:`/`data:` frame), and resolves with `{conversation_id,
-  message_id, sql, rows}` or throws (using the backend's `detail` on an
-  `event: error`, or a plain status-code message on a non-2xx HTTP
-  response).
-- **`ConversationDetailView` (`web/src/App.tsx`) gained a compose form** —
-  a text input + submit button with its own `question`/`sending`/
-  `sendError` state, fully independent of the page's `loading`/`error`
-  state. On submit: calls `postConversationMessage`; on success clears the
-  input and calls a new `onMessageSent` prop; on failure shows an inline
-  error and leaves the question text and the already-rendered conversation
-  untouched.
-- **`App` gained a `refreshKey` counter** added to the existing detail-fetch
-  `useEffect`'s dependency array — `onMessageSent` bumps it to re-trigger
-  that same effect (reusing its existing `stale`-flag race guard) rather
-  than building a second fetch-and-set path.
-- **Gate 2's no-slop pass caught and fixed a real regression**: the
-  original render gate (`{!loading && !error && selectedId !== null &&
-  selectedConversation && <ConversationDetailView .../>}`) unmounted the
-  entire detail view — compose form included — on every post-send refresh,
-  because re-triggering the effect flips `loading` back to `true`. That is
-  exactly the "must not blank out the already-loaded conversation"
-  behavior the brief's own Constraints forbid, just on the success path
-  rather than during the send. Fixed: the detail view now renders whenever
-  `selectedConversation` is populated, regardless of `loading`
-  (`web/src/App.tsx:182`); the page-level "Loading…" text was narrowed to
-  `loading && !selectedConversation` so first-load behavior is unchanged.
-  Confirmed fixed by direct inspection and by a second no-slop pass.
-- **Proven end-to-end twice** (before and after the fix), in a real
-  browser via headless Chrome driven directly over the DevTools Protocol
-  (chromium-cli/Playwright still unavailable in this environment — same
-  workaround as the scaffold slice), against a real uvicorn backend (the
-  project's own `.venv`, NOT the shell's default `python`/`uvicorn`, which
-  resolved to an unrelated venv missing `sqlalchemy` — worth remembering
-  next session) and a real Vite dev server:
-  - Success path: a real question got a real streamed answer (96,478
-    delivered orders, matching `evals/questions.yaml`'s independently
-    verified value for the same question); message count went from 2 to
-    4; input cleared; zero console errors.
-  - Continuous-mount proof: polled the DOM every 250ms across a full real
-    send (13 samples) — form and message list present in every sample,
-    the blocking "Loading…" text never appeared once.
-  - Failure path: backend process killed, then submitted — inline "Error:
-    Failed to fetch" shown, question preserved, message count/form/list
-    unchanged across 8s of 300ms-interval polling.
-  - All throwaway processes (uvicorn, Vite, headless Chrome) stopped
-    afterward; ports confirmed free via `netstat`.
+- **The text-to-SQL pipeline's last unbuilt link now exists and is proven
+  standalone.** `app/pipeline/analyze_answer.py`'s `analyze_answer(question,
+  sql, rows)` makes one Claude call (new `prompts/analyze.md`, a
+  `string.Template` with 5 placeholders) and returns a Pydantic-validated
+  `AnalyzeResponse` (`summary: str`, `explanation: str`, `chart_spec:
+  dict[str, Any]`, `follow_ups: list[str]`) — same one-Claude-call /
+  `extract_json_object` / one-retry / no-placeholder-fallback shape as
+  `generate_sql.py`'s `call_llm_for_sql()`. Result rows are capped to
+  `ROW_SAMPLE_CAP = 20` (`build_prompt()`) before being serialized into the
+  prompt, verified structurally (not just behaviorally) by
+  `BuildPromptRowCappingTests`.
+- **Deliberately NOT wired into `get_answer()`, `app/main.py`, message
+  persistence, or the frontend yet** — proven alone via
+  `app/pipeline/verify_analyze_answer.py`, matching how `generate_sql.py`
+  itself was originally built and proven standalone before later slices
+  wired it into the full pipeline. Wiring it in is this handoff's next
+  brief, below.
+- **Gate 2 caught and fixed four real gaps before accept**, two by the
+  no-slop pass and two others independently:
+  - `prompts/analyze.md` shipped with no matching `evals/*.md` case (the
+    brief's Out-of-scope note only justified skipping the automated
+    `evals/questions.yaml` harness, not the manual-eval-doc precedent
+    `evals/repair_sql.md` set for exactly this situation). Fixed: added
+    `evals/analyze_answer.md`, two real cases — the fixed-question grouped
+    result, and a real single-scalar result ("How many orders have the
+    status 'delivered'?") specifically chosen to prove `chart_spec` isn't
+    fabricated when nothing is meaningfully chartable (it came back a
+    genuine `{}`).
+  - The row-cap Constraint was only tested behaviorally (a 200-row input
+    doesn't crash) — a regression removing the cap entirely would still
+    pass. Fixed: added `BuildPromptRowCappingTests`, asserting the prompt's
+    embedded JSON sample is exactly `rows[:ROW_SAMPLE_CAP]`.
+  - `verify_analyze_answer.py` had no `try/except` matching
+    `verify_answer.py`'s PASSED/FAILED convention. Fixed: added, catching
+    `(SqlValidationError, RuntimeError)`.
+  - **The full test suite itself (not the no-slop pass) caught a real
+    bug**: `call_llm_for_analysis()` read `response.content[0].text`,
+    assuming the first content block is always text — Claude returned a
+    `ThinkingBlock` first for a real call (no `.text` attribute), so both
+    retry attempts failed identically. Fixed with a new
+    `_extract_response_text()` helper (scans for the first `type ==
+    "text"` block). **This exact fragile pattern still exists, unfixed, in
+    `generate_sql.py`, `repair_sql.py`, and `describe.py`** — left alone as
+    pre-existing and out of scope for this slice; if it breaks a real run
+    in any of those three, promote a shared `extract_response_text()`
+    helper into `describe.py` (next to `extract_json_object`) instead of
+    patching each site separately.
 - Full gate record (all five checks green, verdict accept, includes the
-  caught-and-fixed regression): artifacts/reviews/2026-08-05-message-composing.md.
-- Also this session: rewrote `README.md`, which had been left as the
-  generic FDE-starter-kit template describing the kit's own tooling rather
-  than InsightPilot itself — it now documents the actual project (purpose,
-  pipeline, architecture, key features, accurate setup steps verified
-  against the real scripts, usage examples, project structure). Commit
-  `2bd3084`.
+  caught-and-fixed regressions above):
+  artifacts/reviews/2026-08-05-analyze-answer.md.
+- Full suite, run fresh, solo/foreground (to avoid racing the automatic
+  Stop hook's own concurrent run, per the repair-loop slice's documented
+  lesson): 304/304 passing.
 
 ## Proof
 ```
-$ cd web && npm run build
+$ .venv/Scripts/python.exe -m app.pipeline.verify_analyze_answer
+Summary:
+The top 5 product categories by number of orders are cama_mesa_banho (9,417), beleza_saude (8,836), esporte_lazer (7,720), informatica_acessorios (6,689), and moveis_decoracao (6,449).
 
-> web@0.0.0 build
-> tsc -b && vite build
+Explanation:
+The query joined order_items to products on product_id, grouped by product_category_name, and counted distinct order_ids per category, then sorted descending and limited to 5 rows. The sample contains all 5 returned rows, showing cama_mesa_banho (bed/bath/table items) as the leading category, followed by health & beauty, sports & leisure, computer accessories, and furniture/decor, indicating these are the most frequently ordered product types on the platform.
 
-vite v8.2.0 building client environment for production...
-transforming...✓ 16 modules transformed.
-rendering chunks...
-computing gzip size...
-dist/index.html                   0.46 kB │ gzip:  0.29 kB
-dist/assets/index-BWc6qn3o.css    5.87 kB │ gzip:  1.97 kB
-dist/assets/index-BW-TLQ3c.js   144.64 kB │ gzip: 47.22 kB
+Chart spec:
+{'chart_type': 'bar', 'x_field': 'product_category_name', 'y_field': 'order_count', 'orientation': 'vertical', 'title': 'Top 5 Product Categories by Number of Orders', 'sort': 'descending'}
 
-✓ built in 2.34s
+Follow-ups:
+['What are the bottom 5 product categories by number of orders?', 'How do these top categories compare in total revenue rather than order count?', 'What is the average order value for each of these top 5 categories?', 'How have orders in these top categories trended over time?', 'Which sellers dominate sales in the top category, cama_mesa_banho?']
+
+verify_analyze_answer: PASSED
 ```
-Live shipping proof (post-fix, real send, 250ms-interval DOM polling):
+Full suite:
 ```
-MESSAGE_COUNT_BEFORE: 6
-SAMPLES_TAKEN: 18 (every 250ms)
-EVER_UNMOUNTED_FORM_OR_LIST: false
-EVER_SHOWED_STANDALONE_LOADING_TEXT: false
-FINAL_SAMPLE: {"formPresent":true,"listPresent":true,"messageCount":8,
-  "buttonLabel":"Send","loadingTextPresent":false}
+$ .venv/Scripts/python.exe -m unittest discover tests
+Ran 304 tests in 666.073s
+OK
 ```
-Live failure-path proof (backend killed, then submit, 300ms-interval polling):
-```
-MESSAGE_COUNT_BEFORE: 8
-EVER_UNMOUNTED: false
-FINAL_SAMPLE: {"formPresent":true,"listPresent":true,"messageCount":8,
-  "buttonLabel":"Send","errorText":"Error: Failed to fetch",
-  "inputValue":"this should fail, backend killed just now"}
-```
-Full transcripts (including the real streamed answer's SQL/rows and the
-before-fix regression evidence) in the gate record.
 
 ## Open questions / known issues
-- **M5 (Chat UI) has its second slice done: read-only scaffold, then
-  message composing (the write/streaming path).** Chart rendering
-  (ECharts), the collapsed "View SQL" explanation section, follow-up
-  chips, and starter questions are all still unbuilt — and, more
-  fundamentally, **the backend's "analyze & respond" step (PRD.md F2 step
-  6 / §9 item 4) has never been built**: `app/pipeline/answer.py`'s
-  `get_answer()` still returns only `(sql, rows)`; there is no
-  `prompts/analyze.md` and no `summary`/`explanation`/`chart_spec`/
-  `follow_ups` anywhere in the pipeline yet. This is the next brief below
-  — a backend-only slice, deliberately not wired into `get_answer()`/
-  `app/main.py`/persistence/frontend yet, matching how `generate_sql.py`
-  was originally built and proven standalone before later slices wired it
-  into the full pipeline.
-- **A render-gate/loading-flag pattern to watch**: this slice's one caught
-  regression was a `useEffect` re-trigger (for a background refresh)
-  flipping a `loading` flag that a render gate treated as "nothing to
-  show yet," unmounting an already-populated view. First occurrence in
-  this project — distinct from the scaffold slice's stale-response *race*
-  (out-of-order fetches, not a loading-flag/render-gate interaction) — not
-  yet promoted to CLAUDE.md/no-slop.md per the ratchet's second-occurrence
-  rule, but worth naming explicitly if any future slice adds a background
-  refresh to an already-rendered, `loading`-gated view.
-- **The project's own `.venv` (Python 3.11.15) must be used explicitly for
-  `uvicorn`/backend commands** — this session's shell had a *different*
-  default `python`/`uvicorn` on PATH (missing `sqlalchemy` entirely, from
-  an unrelated environment) that silently shadowed the project's own
-  virtualenv. Any future session running the backend directly (not via
-  Docker) should invoke `.venv/Scripts/python.exe -m uvicorn ...`
-  explicitly rather than trusting a bare `uvicorn`/`python` on PATH.
-- **No frontend test runner exists** — carried over from the scaffold
-  slice; live browser verification (via CDP, since chromium-cli/Playwright
-  are unavailable here) continues to stand in for it at Gate 2.
+- **`get_answer()`'s LLM-call cost roughly doubles once `analyze_answer()`
+  is wired in** (next brief, below) — every question already makes 2
+  Voyage embeds + 1-2 Anthropic calls (generate_sql, optional repair); it
+  will gain one more real Anthropic call unconditionally. Worth watching
+  in `evals.run`'s wall-clock time, same shape as the glossary-retrieval
+  slice's already-accepted "doubled Voyage call" cost.
+- **A `response.content[0].text` / `ThinkingBlock` bug pattern, first
+  occurrence** — see above. Only fixed in `analyze_answer.py` this slice;
+  `generate_sql.py`, `repair_sql.py`, `describe.py` still carry the same
+  fragile assumption. Not yet promoted to `templates/no-slop.md` (single
+  occurrence so far, per the project's own "caught twice" ratchet rule) —
+  promote a shared helper if it recurs.
+- **M5 (Chat UI) backend prerequisite is now fully built but still
+  unwired**: chart rendering (ECharts), the collapsed "View SQL"
+  explanation section, and follow-up chips all remain unbuilt in the
+  frontend, and all three are blocked on the next brief below (wiring
+  `analyze_answer()` into `get_answer()`) — none of them can be built
+  against real data until that's done.
+- **A render-gate/loading-flag pattern to watch** (carried over,
+  unrecurred): a `useEffect` re-trigger flipping a `loading` flag that a
+  render gate treats as "nothing to show yet" can unmount an
+  already-populated view — first (and so far only) occurrence was the
+  message-composing slice's caught-and-fixed regression. Not yet promoted;
+  worth naming explicitly if any future slice adds a background refresh
+  to an already-rendered, `loading`-gated view.
+- **The project's own `.venv` (Python 3.11.15) must be used explicitly**
+  for `uvicorn`/backend commands — a bare `python`/`uvicorn` on PATH has
+  resolved to an unrelated environment in a past session.
+- **No frontend test runner exists** — live browser verification (via
+  CDP, since chromium-cli/Playwright are unavailable here) stands in for
+  it at Gate 2, for frontend-touching slices only.
 - **API base URL is a hardcoded `http://localhost:8000` constant** in
   `web/src/api.ts` — open design debt, revisit only if a later slice needs
   configurable environments.
@@ -152,8 +133,9 @@ before-fix regression evidence) in the gate record.
   carried over unchanged, visible in the frontend's raw `content_json`
   rendering.
 - **`plans/logs/_auto-capture.md` remains silently uncommitted across
-  every commit** (pre-existing workflow gap) — flagged for 10+ commits now
-  with no fix proposed.
+  every commit** (pre-existing workflow gap, by design of the capture
+  hook's timing — see this session's own gate record for the mechanics) —
+  flagged for 10+ commits now with no fix proposed.
 - `tests/test_seed_idempotency.py`'s own real Postgres deadlock (M1-era,
   unrelated code) remains uninvestigated.
 - The doubled-Voyage-call-per-question design cost
@@ -170,79 +152,105 @@ before-fix regression evidence) in the gate record.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-Add a new `analyze_answer(question, sql, rows)` pipeline step (PRD.md F2
-step 6 / §9 item 4 — the last unbuilt piece of the text-to-SQL pipeline)
-that makes one Claude call with the question, the executed SQL, and a
-sample of its result rows, and returns a Pydantic-validated `{summary,
-explanation, chart_spec, follow_ups}` object — proven standalone via its
-own verify script, deliberately NOT wired into `get_answer()`, `app/main.py`,
-message persistence, or the frontend yet.
+Wire the already-proven `analyze_answer()` into the real pipeline: extend
+`get_answer()` to also produce the analysis (calling `analyze_answer()`
+itself, internally, right after a successful validate+execute), and
+thread that `AnalyzeResponse` through `app/main.py`'s `AskResponse`/
+`ConversationMessageResult` models and message persistence — so the app
+DB and every existing endpoint's JSON response carry real
+summary/explanation/chart_spec/follow_ups data, with the frontend still
+untouched.
 
 Constraints:
-- No new dependencies; reuse the exact `anthropic`/`pydantic` call pattern
-  `app/pipeline/generate_sql.py`'s `call_llm_for_sql()`/`GenerateSqlResponse`
-  already establish (one Claude call, JSON parsed via
-  `app/catalog/describe.py`'s `extract_json_object`, Pydantic validation
-  with exactly one retry, `MAX_RETRIES = 1`, raising loudly — no
-  placeholder — if both attempts fail).
-- New prompt file `prompts/analyze.md`, `string.Template`-based like
-  `generate_sql.md`/`repair_sql.md` — prompts stay versioned repo files,
-  never inline strings (ARCHITECT.md).
-- The result rows fed into the prompt must be capped to a small sample
-  (do not serialize the full up-to-1000-row result into the prompt) —
-  exact cap size to propose at Gate 1, informed by PRD F1's existing
-  50-row display cap as a reasonable ceiling.
-- `chart_spec` is validated only as a present JSON object
-  (`dict[str, Any]`) this slice — its concrete chart-type/axis-mapping
-  schema is deliberately deferred to whichever future slice actually
-  renders it (ECharts); designing that schema now, with no consumer,
-  would be speculative.
-- `follow_ups` validated as a non-empty list of strings (PRD F1: "3-5
-  suggested follow-up questions").
-- Exact module path: `app/pipeline/analyze_answer.py`, matching
-  `generate_sql.py`/`validate_sql.py`/`execute_sql.py`/`repair_sql.py`'s
-  one-file-per-pipeline-step convention.
-- Must NOT change `get_answer()`, `app/main.py`, message persistence, or
-  any frontend file this slice — wiring is explicitly a later slice's job,
-  so this one stays reviewable and its own contract is provable in
-  isolation, matching how `generate_sql.py` was originally built and
-  proven alone before later slices wired it into the full pipeline.
+- `get_answer()` calls `analyze_answer(question, sql, rows)` itself,
+  internally, immediately after `_answer_with_repair()` succeeds — not
+  left to each of the three call sites in `app/main.py` to invoke
+  separately. This keeps `get_answer()` as "the one complete pipeline
+  chain" (matching the shape `_answer_with_repair()`/`repair_sql()`
+  already established) and requires only one call-site change per
+  consumer (unpacking a wider return), not three separate new
+  `analyze_answer()` invocations.
+- `get_answer()`'s new return shape is `(sql, rows, analysis)` where
+  `analysis` is the real `AnalyzeResponse` instance — a 3-tuple, keeping
+  the existing positional-unpack convention (`sql, rows = await
+  get_answer(...)`) rather than switching to a dict/dataclass return, to
+  minimize churn at existing call sites.
+- If `analyze_answer()` raises (LLM failure after its own exhausted
+  retry), that failure propagates uncaught out of `get_answer()` exactly
+  like an unrepaired `validate_sql()`/`execute_sql()` failure already
+  does today — no partial/degraded response, no silent fallback. This
+  matches CLAUDE.md's "no placeholder" standing rule and the existing
+  502-mapping contract in `app/main.py`'s three endpoints (no endpoint
+  code needs new error-handling logic for this specifically).
+- `AskResponse` and `ConversationMessageResult` (`app/main.py`) each gain a
+  nested `analysis: AnalyzeResponse` field (reusing the real
+  `app.pipeline.analyze_answer.AnalyzeResponse` model directly, per
+  `templates/no-slop.md` item 7 — never hand-flatten its fields into a
+  duplicate set, never a raw dict merge). `_persist_exchange()`/
+  `_persist_message_pair()` need no code change: both already call
+  `jsonable_encoder(response)` on the whole response model, so the new
+  field persists automatically once the model gains it.
+- No new dependencies; no change to `analyze_answer.py`, `prompts/analyze.md`,
+  or `ROW_SAMPLE_CAP` — this slice only wires the already-proven module in,
+  it doesn't change its behavior.
+- No frontend file changes — chart rendering, the "View SQL" section, and
+  follow-up chips are all later slices' work, once real data exists to
+  render.
 
 Inputs:
-- PRD.md F2 step 6 and §9 item 4 (`analyze.md`: "question + SQL + result
-  sample → JSON: {summary, explanation, chart_spec, follow_ups[]}").
-- `app/pipeline/generate_sql.py` (`call_llm_for_sql`, `GenerateSqlResponse`,
-  `PROMPT_TEMPLATE`/`PROMPT_FILE`/`DEFAULT_MODEL`/`MAX_RETRIES` convention)
-  and `app/catalog/describe.py` (`extract_json_object`) as the patterns to
-  mirror exactly.
-- `app/pipeline/answer.py`'s `get_answer()` return shape (`sql, rows`) —
-  the exact input shape `analyze_answer()` must accept, so a later slice
-  can wire `analyze_answer(question, sql, rows)` in directly.
+- `app/pipeline/answer.py`'s current `get_answer()` (returns `(sql,
+  rows)`, chains `generate_sql()` -> `_answer_with_repair()`) and
+  `_retry_once()`/`_answer_with_repair()`'s existing shape, to extend
+  rather than restructure.
+- `app/pipeline/analyze_answer.py`'s `analyze_answer(question, sql, rows)
+  -> AnalyzeResponse`, proven standalone this slice.
+- `app/main.py`'s `AskResponse`, `ConversationMessageResult`,
+  `_persist_exchange()`, `_persist_message_pair()`, and all three
+  endpoints (`/api/ask`, `/api/ask/stream`,
+  `/api/conversations/{conversation_id}/messages`) that currently do
+  `sql, rows = await get_answer(...)` then `AskResponse(sql=sql,
+  rows=rows)`.
+- `app/pipeline/verify_answer.py` / `print_answer()` (done-check
+  convention to mirror) and every existing test that unpacks
+  `get_answer()`'s return (`tests/test_question_parameter.py`,
+  `tests/test_answer_repair.py`, and any FastAPI endpoint test asserting
+  on `AskResponse`'s shape) — these need updating to the new 3-tuple/
+  nested-`analysis` shape, not left broken.
+- `evals/questions.yaml` + `evals/run.py` — must still grade SQL
+  correctness unchanged; re-run fresh to confirm no regression, since this
+  is a pipeline-behavior change per CLAUDE.md's eval standing rule.
 
 Outputs:
-- `prompts/analyze.md`.
-- `AnalyzeResponse` Pydantic model: `summary: str`, `explanation: str`,
-  `chart_spec: dict[str, Any]`, `follow_ups: list[str]`.
-- `app/pipeline/analyze_answer.py`: `analyze_answer(question, sql, rows) ->
-  AnalyzeResponse`.
-- `app/pipeline/verify_analyze_answer.py`: the done-check script — calls
-  the real `get_answer()` for `FIXED_QUESTION` to get a real `(sql, rows)`
-  pair (not hand-faked input), passes it to `analyze_answer()`, and
-  asserts the result satisfies `AnalyzeResponse` with non-empty
-  `summary`/`explanation`/`follow_ups` and a `chart_spec` dict.
+- `app/pipeline/answer.py`: `get_answer()` returns `(sql, rows, analysis)`;
+  `print_answer()` (and `verify_answer.py`) updated to also print the
+  analysis fields.
+- `app/main.py`: `AskResponse`/`ConversationMessageResult` gain `analysis:
+  AnalyzeResponse`; all three endpoints updated to unpack and forward the
+  3-tuple; persistence unchanged (auto-covers the new field via
+  `jsonable_encoder`).
+- Every existing test/eval touching `get_answer()`'s return shape or
+  `AskResponse`'s fields updated to match, still green.
 
 Done-check:
-`python -m app.pipeline.verify_analyze_answer` exits 0, pasted fresh.
+`.venv/Scripts/python.exe -m app.pipeline.verify_answer` exits 0 with
+printed output including `summary`/`explanation`/`chart_spec`/
+`follow_ups` alongside `sql`/rows, pasted fresh, AND a fresh
+`.venv/Scripts/python.exe -m evals.run` still reports 6/6 (confirming the
+new mandatory `analyze_answer()` call didn't regress SQL-correctness
+grading).
 
 Out-of-scope:
-- Wiring `analyze_answer()` into `get_answer()`, `app/main.py`'s response
-  models, message persistence, or any frontend rendering (charts,
-  follow-up chips, the "View SQL" explanation section) — later slice(s),
-  once this step's own contract is proven in isolation.
-- Designing `chart_spec`'s concrete schema beyond "a JSON object" —
-  deferred to the slice that actually renders it.
-- Any change to `evals/questions.yaml`/`evals/run.py` — they test
-  `get_answer()`'s SQL-correctness only, and `analyze_answer()` isn't
-  wired into that call path yet, so there is nothing for this slice to
-  regress or meaningfully extend there.
-- `explain_sql.md` (PRD §9 item 5) — a separate prompt/step, not this one.
+- Any frontend (React/TS) change — chart rendering, the "View SQL"
+  section, follow-up chips: later slice(s), once real wired data exists.
+- Redesigning `chart_spec`'s schema beyond `dict[str, Any]` — unchanged
+  from the prior slice's Constraint.
+- Any change to `analyze_answer.py`'s internals, `prompts/analyze.md`, or
+  `ROW_SAMPLE_CAP` — this slice only wires the already-proven module in.
+- Any change to the SQL repair loop's own semantics
+  (`repair_sql.py`/`execute_sql.py`/`validate_sql.py`/`_retry_once()`) —
+  `analyze_answer()` runs only after a successful `(sql, rows)`, and never
+  triggers or participates in the SQL repair loop itself.
+- Fixing the `response.content[0].text`/`ThinkingBlock` pattern in
+  `generate_sql.py`/`repair_sql.py`/`describe.py` — flagged above as a
+  known, pre-existing, out-of-scope issue; not this slice's job unless it
+  actually breaks a run.
