@@ -3,7 +3,6 @@ import sys
 
 from dotenv import load_dotenv
 
-from app.pipeline.analyze_answer import analyze_answer
 from app.pipeline.answer import get_answer
 from app.pipeline.generate_sql import FIXED_QUESTION
 from app.pipeline.validate_sql import SqlValidationError
@@ -13,8 +12,7 @@ load_dotenv()
 
 async def run():
     try:
-        sql, rows = await get_answer(FIXED_QUESTION)
-        result = analyze_answer(FIXED_QUESTION, sql, rows)
+        _sql, _rows, result = await get_answer(FIXED_QUESTION)
     except (SqlValidationError, RuntimeError) as exc:
         print("verify_analyze_answer: FAILED")
         print(f"  - {exc}")

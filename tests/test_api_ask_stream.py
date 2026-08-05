@@ -17,6 +17,12 @@ This is a deliberate departure from /api/ask's 502-on-failure contract
 (test_api_ask.py) -- the brief is explicit that once the SSE stream has
 started, the HTTP status is always 200 regardless of pipeline outcome.
 
+Per the wire-analyze-answer brief
+(plans/briefs/2026-08-05-wire-analyze-answer.md), the success `result`
+event's exact data key set is updated from {"sql", "rows"} to
+{"sql", "rows", "analysis"}, mirroring test_api_ask.py's update to the
+same shape.
+
 AskStreamHappyPathTests makes one real call through the real pipeline
 (no mocking the LLM/DB), using `app.pipeline.generate_sql.FIXED_QUESTION`
 -- this project's existing canonical example question -- and FastAPI's
@@ -116,7 +122,10 @@ class AskStreamHappyPathTests(unittest.TestCase):
             try:
                 client = TestClient(app)
                 # One real, billed pipeline call (LLM + read-only DB
-                # execute), shared across every test in this class.
+                # execute, plus -- per the wire-analyze-answer brief --
+                # one more real Anthropic call for the analysis step
+                # get_answer() now runs internally), shared across every
+                # test in this class.
                 with client.stream(
                     "POST",
                     "/api/ask/stream",
@@ -171,14 +180,15 @@ class AskStreamHappyPathTests(unittest.TestCase):
             f"Outputs, got events: {events!r}",
         )
 
-    def test_result_event_data_has_exactly_the_sql_and_rows_keys(self):
+    def test_result_event_data_has_exactly_the_sql_rows_and_analysis_keys(self):
         events = _parse_sse_events(self.body_text)
         result_data = next(data for name, data in events if name == "result")
         self.assertEqual(
             set(result_data.keys()),
-            {"sql", "rows"},
+            {"sql", "rows", "analysis"},
             "expected the result event's data to be exactly "
-            f"{{'sql', 'rows'}} per the brief's Outputs, got: {result_data!r}",
+            "{'sql', 'rows', 'analysis'} per the wire-analyze-answer "
+            f"brief's Outputs, got: {result_data!r}",
         )
 
     def test_result_event_sql_is_a_non_empty_string(self):
@@ -201,6 +211,30 @@ class AskStreamHappyPathTests(unittest.TestCase):
             f"expected at least one real row back, got: {result_data['rows']!r}",
         )
 
+    def test_result_event_analysis_is_a_dict_with_exactly_the_analyze_response_keys(
+        self,
+    ):
+        events = _parse_sse_events(self.body_text)
+        result_data = next(data for name, data in events if name == "result")
+        self.assertIsInstance(result_data.get("analysis"), dict)
+        self.assertEqual(
+            set(result_data["analysis"].keys()),
+            {"summary", "explanation", "chart_spec", "follow_ups"},
+            "expected the result event's 'analysis' field to be exactly "
+            "the real AnalyzeResponse shape "
+            "{'summary', 'explanation', 'chart_spec', 'follow_ups'}, "
+            f"got: {result_data['analysis']!r}",
+        )
+
+    def test_result_event_analysis_follow_ups_is_a_nonempty_list_of_strings(self):
+        events = _parse_sse_events(self.body_text)
+        result_data = next(data for name, data in events if name == "result")
+        follow_ups = result_data["analysis"]["follow_ups"]
+        self.assertIsInstance(follow_ups, list)
+        self.assertGreater(len(follow_ups), 0)
+        for item in follow_ups:
+            self.assertIsInstance(item, str)
+
     def test_body_contains_no_error_event(self):
         events = _parse_sse_events(self.body_text)
         error_events = [e for e in events if e[0] == "error"]
@@ -219,7 +253,10 @@ class AskStreamFailurePathTests(unittest.TestCase):
     HTTP error status. Mirrors test_api_ask.py's
     AskEndpointFailurePathTests: a plain fake stands in for
     get_answer() instead of relying on a real double-LLM repair failure
-    being reproducible through the NL-question-only HTTP interface."""
+    being reproducible through the NL-question-only HTTP interface. Per
+    the wire-analyze-answer brief, this also covers an analyze_answer()
+    failure inside get_answer(), since get_answer() is the one seam
+    app/main.py calls for both steps."""
 
     def setUp(self):
         if _IMPORT_ERROR is not None:

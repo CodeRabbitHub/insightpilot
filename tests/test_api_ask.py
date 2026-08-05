@@ -9,6 +9,16 @@ Per the brief's Outputs: request `{"question": str}` -> `200
 get_answer()'s repair loop also fails (a real HTTP error status, not an
 uncaught 500 crash).
 
+Per the wire-analyze-answer brief
+(plans/briefs/2026-08-05-wire-analyze-answer.md), the success response
+body's exact key set is updated from {"sql", "rows"} to
+{"sql", "rows", "analysis"}: `AskResponse` gains a nested
+`analysis: AnalyzeResponse` field carrying get_answer()'s own internally
+-computed summary/explanation/chart_spec/follow_ups. The key-set
+assertion below is updated to that new shape (never loosened -- the new
+field is itself asserted on, not just tolerated), and a new test class
+proves the analysis field's shape.
+
 AskEndpointHappyPathTests makes one real call through the real pipeline
 (no mocking the LLM/DB), using FastAPI's TestClient and
 `app.pipeline.generate_sql.FIXED_QUESTION` -- this project's existing
@@ -33,7 +43,10 @@ exposed over HTTP). So the "second repair attempt also fails" case is
 proven the same way test_answer_repair.py's RetryOnceTests proves
 propagation: with a plain fake standing in for get_answer(), patched at
 `app.main.get_answer` (the one function app/main.py's handler calls),
-instead of real I/O.
+instead of real I/O. Per the wire-analyze-answer brief, this same seam
+now also covers an analyze_answer() failure inside get_answer() -- from
+app/main.py's perspective there is no difference between the two, since
+get_answer() owns both steps internally.
 
 Test_empty_question_maps_to_502_via_the_real_pipeline below covers a
 second, genuinely real and deterministic failure case with no mocking at
@@ -88,7 +101,10 @@ class AskEndpointHappyPathTests(unittest.TestCase):
             try:
                 client = TestClient(app)
                 # One real, billed pipeline call (LLM + read-only DB
-                # execute), shared across every test in this class.
+                # execute, plus -- per the wire-analyze-answer brief --
+                # one more real Anthropic call for the analysis step
+                # get_answer() now runs internally), shared across every
+                # test in this class.
                 cls.response = client.post(
                     "/api/ask", json={"question": generate_sql.FIXED_QUESTION}
                 )
@@ -129,13 +145,14 @@ class AskEndpointHappyPathTests(unittest.TestCase):
             f"{self.response.status_code}: {self.response.text}",
         )
 
-    def test_response_body_has_exactly_the_sql_and_rows_keys(self):
+    def test_response_body_has_exactly_the_sql_rows_and_analysis_keys(self):
         body = self.response.json()
         self.assertEqual(
             set(body.keys()),
-            {"sql", "rows"},
-            f"expected the success response body to be exactly "
-            f"{{'sql', 'rows'}} per the brief's Outputs, got: {body!r}",
+            {"sql", "rows", "analysis"},
+            "expected the success response body to be exactly "
+            "{'sql', 'rows', 'analysis'} per the wire-analyze-answer "
+            f"brief's Outputs, got: {body!r}",
         )
 
     def test_response_sql_is_a_non_empty_string(self):
@@ -156,6 +173,42 @@ class AskEndpointHappyPathTests(unittest.TestCase):
             f"expected at least one real row back, got: {body['rows']!r}",
         )
 
+    def test_response_analysis_is_a_dict_with_exactly_the_analyze_response_keys(self):
+        body = self.response.json()
+        self.assertIsInstance(body.get("analysis"), dict)
+        self.assertEqual(
+            set(body["analysis"].keys()),
+            {"summary", "explanation", "chart_spec", "follow_ups"},
+            "expected the response body's 'analysis' field to be exactly "
+            "the real AnalyzeResponse shape "
+            "{'summary', 'explanation', 'chart_spec', 'follow_ups'}, "
+            f"got: {body['analysis']!r}",
+        )
+
+    def test_response_analysis_summary_and_explanation_are_nonblank_strings(self):
+        body = self.response.json()
+        analysis = body["analysis"]
+        self.assertIsInstance(analysis["summary"], str)
+        self.assertTrue(analysis["summary"].strip())
+        self.assertIsInstance(analysis["explanation"], str)
+        self.assertTrue(analysis["explanation"].strip())
+
+    def test_response_analysis_chart_spec_is_a_dict(self):
+        body = self.response.json()
+        self.assertIsInstance(body["analysis"]["chart_spec"], dict)
+
+    def test_response_analysis_follow_ups_is_a_nonempty_list_of_strings(self):
+        body = self.response.json()
+        follow_ups = body["analysis"]["follow_ups"]
+        self.assertIsInstance(follow_ups, list)
+        self.assertGreater(
+            len(follow_ups),
+            0,
+            f"expected a non-empty follow_ups list, got: {follow_ups!r}",
+        )
+        for item in follow_ups:
+            self.assertIsInstance(item, str)
+
 
 class AskEndpointFailurePathTests(unittest.TestCase):
     """Proves the endpoint maps a pipeline exception to a real HTTP
@@ -163,7 +216,10 @@ class AskEndpointFailurePathTests(unittest.TestCase):
     brief requires, isolated from the LLM's own nondeterminism the same
     way RetryOnceTests isolates repair-loop propagation: a plain fake
     stands in for get_answer() instead of relying on a real
-    double-failure being reproducible."""
+    double-failure being reproducible. Per the wire-analyze-answer
+    brief, this covers an analyze_answer() failure inside get_answer()
+    too, since get_answer() is the one seam app/main.py calls for both
+    steps."""
 
     def setUp(self):
         if _IMPORT_ERROR is not None:
@@ -200,6 +256,24 @@ class AskEndpointFailurePathTests(unittest.TestCase):
             f"expected a 'detail' key in the 502 error body, got: {body!r}",
         )
         self.assertIsInstance(body["detail"], str)
+
+    def test_502_response_body_has_no_partial_or_degraded_analysis_field(self):
+        # Per the wire-analyze-answer brief's Constraint: a get_answer()
+        # failure (whether from validate/execute or from its internal
+        # analyze_answer() call) must produce "no partial/degraded
+        # response, no silent fallback" -- the 502 body must be exactly
+        # the error shape, never a body that also carries a sql/rows/
+        # analysis key alongside the error.
+        with patch("app.main.get_answer", side_effect=_fake_get_answer_that_fails):
+            client = TestClient(app)
+            response = client.post(
+                "/api/ask", json={"question": "irrelevant for this test"}
+            )
+
+        body = response.json()
+        self.assertNotIn("analysis", body)
+        self.assertNotIn("sql", body)
+        self.assertNotIn("rows", body)
 
 
 class AskEndpointRealFailureInputTests(unittest.TestCase):

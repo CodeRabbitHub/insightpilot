@@ -33,6 +33,14 @@ own calls created -- since this test owns that id's data completely, an
 exact assertion (not a membership check) is appropriate here, per the
 brief.
 
+Per the wire-analyze-answer brief
+(plans/briefs/2026-08-05-wire-analyze-answer.md), the persisted
+assistant message's `content_json` gains an `"analysis"` key alongside
+`"sql"`/`"rows"` (via `_persist_message_pair()`'s existing
+`jsonable_encoder(response)` call on the whole `ConversationMessageResult`,
+which now has an `analysis` field). The key-set assertion below is
+updated to that new shape.
+
 ConversationListMembershipTests makes its own cheap `POST
 /api/conversations` call (no LLM) and asserts the resulting id is a
 member of `GET /api/conversations`'s list -- a membership check, not an
@@ -334,14 +342,33 @@ class ConversationDetailTests(unittest.TestCase):
             f"vs db={assistant_db_row.content_json!r}",
         )
 
-    def test_second_messages_content_json_has_exactly_sql_and_rows_keys(self):
+    def test_second_messages_content_json_has_exactly_sql_rows_and_analysis_keys(
+        self,
+    ):
         body = self._get_detail().json()
         self.assertEqual(
             set(body["messages"][1]["content_json"].keys()),
-            {"sql", "rows"},
+            {"sql", "rows", "analysis"},
             "expected the persisted assistant content_json to be exactly "
-            f"{{'sql', 'rows'}}, got: {body['messages'][1]['content_json']!r}",
+            "{'sql', 'rows', 'analysis'} per the wire-analyze-answer "
+            f"brief's Outputs, got: {body['messages'][1]['content_json']!r}",
         )
+
+    def test_second_messages_content_json_analysis_has_the_analyze_response_shape(
+        self,
+    ):
+        body = self._get_detail().json()
+        analysis = body["messages"][1]["content_json"]["analysis"]
+        self.assertIsInstance(analysis, dict)
+        self.assertEqual(
+            set(analysis.keys()),
+            {"summary", "explanation", "chart_spec", "follow_ups"},
+            "expected the persisted assistant content_json's 'analysis' "
+            "value to be exactly the real AnalyzeResponse shape "
+            "{'summary', 'explanation', 'chart_spec', 'follow_ups'}, "
+            f"got: {analysis!r}",
+        )
+        self.assertGreater(len(analysis["follow_ups"]), 0)
 
     def test_each_messages_created_at_is_a_non_empty_string(self):
         body = self._get_detail().json()

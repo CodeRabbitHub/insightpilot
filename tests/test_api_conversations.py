@@ -11,6 +11,16 @@ under that exact `conversation_id`, and streams the outcome as SSE,
 where a successful `result` event's data is exactly
 `{"conversation_id", "message_id", "sql", "rows"}`).
 
+Per the wire-analyze-answer brief
+(plans/briefs/2026-08-05-wire-analyze-answer.md), that `result` event's
+exact data key set is updated to
+`{"conversation_id", "message_id", "sql", "rows", "analysis"}`:
+`ConversationMessageResult` gains a nested `analysis: AnalyzeResponse`
+field carrying get_answer()'s own internally-computed
+summary/explanation/chart_spec/follow_ups. The key-set assertion below is
+updated to that new shape (never loosened), plus new tests proving the
+analysis field's shape.
+
 This is written before app/main.py grows these two routes -- it will
 fail to import/collect until that implementation lands, which is
 expected and correct for tests written before implementation.
@@ -277,10 +287,11 @@ class ConversationMessageHappyPathTests(unittest.TestCase):
         result_data = self._result_event_data()
         self.assertEqual(
             set(result_data.keys()),
-            {"conversation_id", "message_id", "sql", "rows"},
+            {"conversation_id", "message_id", "sql", "rows", "analysis"},
             "expected the result event's data to be exactly "
-            "{'conversation_id', 'message_id', 'sql', 'rows'} per the "
-            f"brief's Outputs, got: {result_data!r}",
+            "{'conversation_id', 'message_id', 'sql', 'rows', 'analysis'} "
+            "per the wire-analyze-answer brief's Outputs, got: "
+            f"{result_data!r}",
         )
 
     def test_result_event_conversation_id_matches_the_created_conversation(self):
@@ -319,6 +330,28 @@ class ConversationMessageHappyPathTests(unittest.TestCase):
             f"expected at least one real row back, got: {result_data['rows']!r}",
         )
 
+    def test_result_event_analysis_is_a_dict_with_exactly_the_analyze_response_keys(
+        self,
+    ):
+        result_data = self._result_event_data()
+        self.assertIsInstance(result_data.get("analysis"), dict)
+        self.assertEqual(
+            set(result_data["analysis"].keys()),
+            {"summary", "explanation", "chart_spec", "follow_ups"},
+            "expected the result event's 'analysis' field to be exactly "
+            "the real AnalyzeResponse shape "
+            "{'summary', 'explanation', 'chart_spec', 'follow_ups'}, "
+            f"got: {result_data['analysis']!r}",
+        )
+
+    def test_result_event_analysis_follow_ups_is_a_nonempty_list_of_strings(self):
+        result_data = self._result_event_data()
+        follow_ups = result_data["analysis"]["follow_ups"]
+        self.assertIsInstance(follow_ups, list)
+        self.assertGreater(len(follow_ups), 0)
+        for item in follow_ups:
+            self.assertIsInstance(item, str)
+
     def test_exactly_two_messages_persisted_under_that_conversation_id(self):
         self.assertEqual(
             len(self.messages),
@@ -350,6 +383,21 @@ class ConversationMessageHappyPathTests(unittest.TestCase):
             "expected the second persisted message's id to equal the "
             f"SSE result event's message_id ({result_data['message_id']!r}), "
             f"got: {assistant_message.id!r}",
+        )
+
+    def test_persisted_assistant_message_content_json_includes_the_analysis(self):
+        # Per the wire-analyze-answer brief: _persist_message_pair()
+        # calls jsonable_encoder(response) on the whole
+        # ConversationMessageResult, so the new analysis field must
+        # persist automatically alongside sql/rows.
+        assistant_message = self.messages[1]
+        result_data = self._result_event_data()
+        self.assertEqual(
+            assistant_message.content_json.get("analysis"),
+            result_data["analysis"],
+            "expected the persisted assistant message's content_json to "
+            "include the exact same 'analysis' value as the SSE result "
+            f"event, got: {assistant_message.content_json!r}",
         )
 
 

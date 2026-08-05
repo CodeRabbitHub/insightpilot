@@ -3,6 +3,7 @@ import asyncio
 from dotenv import load_dotenv
 
 from app.catalog.sync import connect
+from app.pipeline.analyze_answer import analyze_answer
 from app.pipeline.execute_sql import execute_sql
 from app.pipeline.generate_sql import FIXED_QUESTION, generate_sql
 from app.pipeline.repair_sql import repair_sql
@@ -59,22 +60,31 @@ async def _answer_with_repair(question, sql):
 async def get_answer(question=FIXED_QUESTION):
     """Chain generate_sql() -> validate_sql() -> execute_sql() for the
     given question (default FIXED_QUESTION), repairing once via
-    repair_sql() if the first attempt fails validation or execution.
-    Returns (sql, rows)."""
+    repair_sql() if the first attempt fails validation or execution, then
+    analyze_answer() over the resulting (sql, rows). Returns (sql, rows,
+    analysis). An analyze_answer() failure propagates unmodified, same as
+    an unrepaired validate/execute failure -- no partial/degraded
+    response."""
     sql = generate_sql(question)
-    return await _answer_with_repair(question, sql)
+    sql, rows = await _answer_with_repair(question, sql)
+    analysis = analyze_answer(question, sql, rows)
+    return sql, rows, analysis
 
 
-def print_answer(sql, rows):
+def print_answer(sql, rows, analysis):
     print(f"SQL:\n{sql}\n")
     print("Rows:")
     for row in rows:
         print(row)
+    print(f"\nSummary:\n{analysis.summary}\n")
+    print(f"Explanation:\n{analysis.explanation}\n")
+    print(f"Chart spec:\n{analysis.chart_spec}\n")
+    print(f"Follow-ups:\n{analysis.follow_ups}")
 
 
 def main():
-    sql, rows = asyncio.run(get_answer())
-    print_answer(sql, rows)
+    sql, rows, analysis = asyncio.run(get_answer())
+    print_answer(sql, rows, analysis)
 
 
 if __name__ == "__main__":

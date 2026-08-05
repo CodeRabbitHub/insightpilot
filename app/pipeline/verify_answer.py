@@ -11,13 +11,13 @@ load_dotenv()
 
 async def run():
     try:
-        sql, rows = await get_answer()
-    except SqlValidationError as exc:
+        sql, rows, analysis = await get_answer()
+    except (SqlValidationError, RuntimeError) as exc:
         print("verify_answer: FAILED")
         print(f"  - {exc}")
         return 1
 
-    print_answer(sql, rows)
+    print_answer(sql, rows, analysis)
 
     print("\nverify_answer: PASSED")
     return 0

@@ -97,22 +97,21 @@ def main() -> int:
         return 0
 
     try:
-        # 600s: real, fresh measurements (2026-08-03) show the full suite
-        # actually runs 200-250s solo, with no rate-limit contention (a
-        # 2026-08-03 retest found no evidence of the free-tier 3 RPM cap
-        # this timeout was previously padded for) -- 600s is ~2.5x that,
-        # not the much looser 1200s a first pass at reverting this landed
-        # on. A shorter timeout doesn't just fail fast -- subprocess.run()
-        # kills the child on timeout, which can land mid-way through one
-        # of the integration tests that mutates a shared DB row and
-        # restores it in a `finally` (e.g. test_catalog_sync.py's
-        # preserve-description test): a hard kill skips that `finally`,
-        # permanently corrupting the row for every later test run until
-        # someone notices and repairs it by hand. 600s keeps real margin
-        # over the measured runtime while still catching a genuine hang
-        # in ~10 minutes instead of ~20.
+        # 1200s: the wire-analyze-answer slice (2026-08-05) made get_answer()
+        # unconditionally run one more real Anthropic call per question,
+        # pushing the full suite's real solo runtime from ~200-250s to
+        # ~570-840s -- past the previous 600s timeout, which twice caused a
+        # hard kill of this subprocess mid-run in the same session. A
+        # shorter timeout doesn't just fail fast -- subprocess.run() kills
+        # the child on timeout, which can land mid-way through one of the
+        # integration tests that mutates a shared DB row and restores it in
+        # a `finally` (e.g. test_catalog_sync.py's preserve-description
+        # test): a hard kill skips that `finally`, permanently corrupting
+        # the row for every later test run until someone notices and
+        # repairs it by hand. 1200s keeps real margin over the new measured
+        # runtime while still catching a genuine hang in ~20 minutes.
         result = subprocess.run(
-            TEST_CMD, capture_output=True, text=True, timeout=600
+            TEST_CMD, capture_output=True, text=True, timeout=1200
         )
     except Exception:
         return 0

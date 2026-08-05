@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.db.models import Conversation, Message
 from app.db.session import async_session_factory
+from app.pipeline.analyze_answer import AnalyzeResponse
 from app.pipeline.answer import get_answer
 
 app = FastAPI()
@@ -30,6 +31,7 @@ class AskRequest(BaseModel):
 class AskResponse(BaseModel):
     sql: str
     rows: list[dict[str, Any]]
+    analysis: AnalyzeResponse
 
 
 class CreateConversationResponse(BaseModel):
@@ -41,6 +43,7 @@ class ConversationMessageResult(BaseModel):
     message_id: int
     sql: str
     rows: list[dict[str, Any]]
+    analysis: AnalyzeResponse
 
 
 class ConversationSummary(BaseModel):
@@ -101,10 +104,10 @@ async def ask(request: AskRequest) -> AskResponse:
     this endpoint's perspective all of it is an upstream pipeline failure,
     not a bug in the transport layer."""
     try:
-        sql, rows = await get_answer(request.question)
+        sql, rows, analysis = await get_answer(request.question)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    response = AskResponse(sql=sql, rows=rows)
+    response = AskResponse(sql=sql, rows=rows, analysis=analysis)
     await _persist_exchange(request.question, response)
     return response
 
@@ -116,7 +119,7 @@ async def _ask_stream_events(question: str):
     started, there is no later status code to change, so failure is
     signaled by the event type instead."""
     try:
-        sql, rows = await get_answer(question)
+        sql, rows, analysis = await get_answer(question)
     except Exception as exc:
         payload = json.dumps({"detail": str(exc)})
         yield f"event: error\ndata: {payload}\n\n"
@@ -124,7 +127,7 @@ async def _ask_stream_events(question: str):
     # Routed through AskResponse, same as /api/ask, so both endpoints
     # validate get_answer()'s output against the same shape rather than
     # this route trusting an unvalidated dict.
-    response = AskResponse(sql=sql, rows=rows)
+    response = AskResponse(sql=sql, rows=rows, analysis=analysis)
     await _persist_exchange(question, response)
     payload = json.dumps(jsonable_encoder(response))
     yield f"event: result\ndata: {payload}\n\n"
@@ -195,18 +198,19 @@ async def _conversation_message_stream_events(conversation_id: int, question: st
     byte-for-byte unchanged this slice, so its generator is left
     untouched rather than refactored to share code with this one."""
     try:
-        sql, rows = await get_answer(question)
+        sql, rows, analysis = await get_answer(question)
     except Exception as exc:
         payload = json.dumps({"detail": str(exc)})
         yield f"event: error\ndata: {payload}\n\n"
         return
-    response = AskResponse(sql=sql, rows=rows)
+    response = AskResponse(sql=sql, rows=rows, analysis=analysis)
     message_id = await _persist_message_pair(conversation_id, question, response)
     result = ConversationMessageResult(
         conversation_id=conversation_id,
         message_id=message_id,
         sql=response.sql,
         rows=response.rows,
+        analysis=response.analysis,
     )
     payload = json.dumps(jsonable_encoder(result))
     yield f"event: result\ndata: {payload}\n\n"

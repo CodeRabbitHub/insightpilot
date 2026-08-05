@@ -21,6 +21,13 @@ covers ONLY:
       THAT question, not silently fall back to FIXED_QUESTION regardless
       of what's passed in.
 
+Per the wire-analyze-answer brief
+(plans/briefs/2026-08-05-wire-analyze-answer.md), `get_answer()` now
+returns a `(sql, rows, analysis)` 3-tuple rather than a `(sql, rows)`
+pair -- AnswerCustomQuestionEndToEndTests' unpacking below is updated to
+match that new contract (never loosened; the extra `analysis` element is
+now itself asserted on).
+
 GenerateSqlCustomQuestionEndToEndTests and AnswerCustomQuestionEnd
 ToEndTests require: docker compose db service running, the catalog
 already synced/described (prior slices), and working
@@ -152,13 +159,16 @@ class AnswerCustomQuestionEndToEndTests(unittest.TestCase):
         cls.describe_result = run_describe()
         cls.sql = None
         cls.rows = None
+        cls.analysis = None
         cls.real_order_count = None
         if cls.sync_result.returncode == 0 and cls.describe_result.returncode == 0:
             # One real Claude API call (via generate_sql), one real
-            # Voyage embedding call, and one real execute against the
-            # read-only asyncpg connection -- shared across every test in
-            # this class.
-            cls.sql, cls.rows = asyncio.run(
+            # Voyage embedding call, one real execute against the
+            # read-only asyncpg connection, and (per the wire-analyze-
+            # answer brief) one more real Anthropic call for the analysis
+            # step get_answer() now runs internally -- shared across
+            # every test in this class.
+            cls.sql, cls.rows, cls.analysis = asyncio.run(
                 answer.get_answer(question=CUSTOM_QUESTION)
             )
 
@@ -228,6 +238,24 @@ class AnswerCustomQuestionEndToEndTests(unittest.TestCase):
             f"olist.orders row count is {self.real_order_count!r} -- the "
             "custom question was not actually answered correctly",
         )
+
+    def test_get_answer_for_the_custom_question_also_returns_a_real_analysis(self):
+        # get_answer() now returns a (sql, rows, analysis) 3-tuple per
+        # plans/briefs/2026-08-05-wire-analyze-answer.md -- proves the
+        # third element is a real AnalyzeResponse for a non-default
+        # question too, not only for FIXED_QUESTION.
+        from app.pipeline.analyze_answer import AnalyzeResponse
+
+        self.assertIsInstance(
+            self.analysis,
+            AnalyzeResponse,
+            "expected get_answer(question=<custom question>)'s third "
+            f"return value to be a real AnalyzeResponse, got: {self.analysis!r}",
+        )
+        self.assertTrue(self.analysis.summary.strip())
+        self.assertTrue(self.analysis.explanation.strip())
+        self.assertIsInstance(self.analysis.chart_spec, dict)
+        self.assertGreater(len(self.analysis.follow_ups), 0)
 
 
 if __name__ == "__main__":

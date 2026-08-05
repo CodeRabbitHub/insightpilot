@@ -65,7 +65,7 @@ def format_summary(num_correct, total):
 
 async def _run_question(case):
     try:
-        _sql, rows = await get_answer(case["question"])
+        _sql, rows, _analysis = await get_answer(case["question"])
     except Exception as exc:
         return False, str(exc)
     return check_expected(rows, case["expected"]), None

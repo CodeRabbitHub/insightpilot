@@ -19,6 +19,14 @@ analyze_answer() call, shared across every test in the class via
 setUpClass (mirrors test_repair_sql.py's RepairSqlEndToEndTests
 precedent: one real call per class, never repeated per-test).
 
+Per the wire-analyze-answer brief
+(plans/briefs/2026-08-05-wire-analyze-answer.md), get_answer() itself now
+also returns an internally-computed analysis as a third tuple element --
+setUpClass below unpacks that third element (captured, deliberately not
+asserted on here; that wiring's own behavior is covered by
+tests/test_wire_analyze_answer.py) so this file's own unpacking still
+matches get_answer()'s real return shape.
+
 AnalyzeAnswerRowSampleCappingTests exercises the brief's row-capping
 Constraint ("do not serialize the full up-to-1000-row result into the
 prompt") behaviorally: a hand-crafted row list well beyond a small sample
@@ -238,6 +246,7 @@ class AnalyzeAnswerEndToEndTests(unittest.TestCase):
         cls.question = None
         cls.sql = None
         cls.rows = None
+        cls.get_answer_analysis = None
         cls.get_answer_error = None
         cls.result = None
         if cls.sync_result.returncode == 0 and cls.describe_result.returncode == 0:
@@ -248,8 +257,15 @@ class AnalyzeAnswerEndToEndTests(unittest.TestCase):
             try:
                 # One real, billed chain (two Voyage embeds + one
                 # Anthropic call), shared across every test in this
-                # class -- never repeated per-test.
-                cls.sql, cls.rows = asyncio.run(get_answer(cls.question))
+                # class -- never repeated per-test. get_answer() itself
+                # now also returns a third, internally-computed analysis
+                # element (plans/briefs/2026-08-05-wire-analyze-answer.md)
+                # -- captured here but not asserted on; that wiring's own
+                # behavior is covered by test_wire_analyze_answer.py, not
+                # this file, which is scoped to analyze_answer() itself.
+                cls.sql, cls.rows, cls.get_answer_analysis = asyncio.run(
+                    get_answer(cls.question)
+                )
             except Exception as exc:  # pragma: no cover - environment/network
                 cls.get_answer_error = exc
 
