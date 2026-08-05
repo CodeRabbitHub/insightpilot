@@ -1246,3 +1246,67 @@ Date:   Tue Aug 4 21:57:09 2026 +0530
  tests/test_api_conversations.py                         | 528 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  4 files changed, 840 insertions(+)
 ```
+
+## Commit at 2026-08-04 21:59
+```
+commit 2ab5850c782c0c77ec1d90dcea87926e133c8924
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 21:59:02 2026 +0530
+
+    Capture: conversations-endpoints slice log
+    
+    Slice log for the conversations-endpoints slice (commit 7fa16e7), and a
+    new templates/no-slop.md line under category 7: an API/SSE response
+    payload must always be built from a dedicated Pydantic model, never a
+    raw dict merge or hand-assembled dict -- caught twice now (the
+    fastapi-ask-stream-endpoint slice's unvalidated dict, and this slice's
+    {**jsonable_encoder(response), ...} draft, the latter caught at the Plan
+    stage before it ever shipped).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-04-conversations-endpoints.md | 84 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                      | 49 +++++++++++++++++++++++++++++++++++++++++++++++++
+ templates/no-slop.md                             | 12 ++++++++++++
+ 3 files changed, 145 insertions(+)
+```
+
+## Commit at 2026-08-04 22:01
+```
+commit 44b143d487e1faa6d10bc6b22b5f9543f02ca004
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Tue Aug 4 22:01:51 2026 +0530
+
+    Handoff: conversations-endpoints slice done, next brief is read-back endpoints
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md | 357 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------------------
+ 1 file changed, 181 insertions(+), 176 deletions(-)
+```
+
+## Commit at 2026-08-05 04:09
+```
+commit c7e470016f4f8042c08098cd29f7226aeb9ae8db
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 04:09:55 2026 +0530
+
+    Add GET /api/conversations and GET /api/conversations/{id}
+    
+    Completes the read-back half of F7: a client can now list every
+    conversation (newest first) and fetch one's full detail plus its
+    messages in chronological order, 404 on an unknown id. Pure reads --
+    no LLM call, no SSE. The existing POST routes and /api/ask(/stream)
+    stay unchanged.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ app/main.py                                                  |  70 +++++++++++++++++
+ artifacts/reviews/2026-08-05-conversations-read-endpoints.md | 124 +++++++++++++++++++++++++++++
+ plans/briefs/2026-08-05-conversations-read-endpoints.md      |  81 +++++++++++++++++++
+ tests/test_api_conversations_read.py                         | 607 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 882 insertions(+)
+```
