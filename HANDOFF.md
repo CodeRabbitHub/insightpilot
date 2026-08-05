@@ -1,73 +1,69 @@
 # Handoff
 
 Date: 2026-08-05
-Slice just completed: plans/briefs/2026-08-05-react-vite-scaffold.md
-  + plans/logs/2026-08-05-react-vite-scaffold.md
-  (commits 21add48, 92bf205)
+Slice just completed: plans/briefs/2026-08-05-message-composing.md
+  + plans/logs/2026-08-05-message-composing.md
+  (commits b05c795, a68b74e)
 
 ## State of the work
-- **A working frontend now exists at `web/`** — React 18 + Vite +
-  TypeScript + Tailwind 3, per ARCHITECT.md's stack decision. One page,
-  one component (`App.tsx`), one piece of view state (`selectedId`):
-  null shows the conversation list (`GET /api/conversations`), non-null
-  shows one conversation's detail (`GET /api/conversations/{id}`) with a
-  "← Back" control. Design contract: artifacts/design/2026-08-05-react-vite-scaffold.md.
-- **`app/main.py` now has `CORSMiddleware`** scoped to exactly
-  `http://localhost:5173` (Vite's dev-server origin) — every existing
-  route otherwise byte-for-byte unchanged (confirmed via diff, additions
-  only).
-- **`web/src/api.ts`** holds `ConversationSummary`/`MessageDetail`/
-  `ConversationDetail` TypeScript types mirroring the three backend
-  Pydantic models field-for-field, plus `fetchConversations()` /
-  `fetchConversation(id)` — thin `fetch()` wrappers, no library. `API_BASE`
-  is a hardcoded `http://localhost:8000` constant (open design debt, see
-  below).
-- **Proven end-to-end in a real browser**: real uvicorn backend + real
-  Vite dev server + a real headless Chrome driven over the DevTools
-  Protocol directly (chromium-cli and Playwright are both unavailable in
-  this environment; drove Chrome's own CDP with a small Node script
-  instead — no new dependency installed). List view rendered all 22 real,
-  pre-existing conversations, newest-first. A real click loaded
-  conversation #155's actual detail: its real question ("What are the top
-  5 product categories by number of orders?") and the real generated SQL
-  + result rows, rendered as `<pre>`-formatted JSON per message. Zero
-  browser console errors. All three throwaway processes (uvicorn, Vite,
-  headless Chrome) stopped afterward; `netstat` confirmed all three ports
-  free.
-- **`npm create vite@latest` defaulted to React 19 and Tailwind v4** —
-  caught before the no-slop pass by checking `package.json` right after
-  scaffolding. Pinned back to React 18 and Tailwind v3 (with
-  postcss+autoprefixer, matching what the brief's Constraints had
-  pre-approved by name) to match ARCHITECT.md's actual decision. First
-  occurrence of this pattern in the project — no CLAUDE.md/no-slop.md
-  promotion yet, but any future slice that runs a scaffolding generator
-  should check the generated manifest against ARCHITECT.md before
-  building on top of it.
-- **No-slop pass fixed five more issues**, all re-verified green: an
-  unapproved `oxlint` dependency the Vite template bundled by default
-  (removed — not on the brief's dependency allow-list, unused by the
-  done-check); a machine-specific hardcoded path in an emergency hook fix
-  (see below — now resolved via `git rev-parse --show-toplevel`); an
-  unguarded `subprocess.run` call in that same fix (now wrapped in
-  try/except matching its neighbor); a stale-response race in the detail
-  view (clicking conversation A then B before A's fetch resolves could
-  overwrite the view with A's late response — fixed with a
-  cleanup-scoped staleness flag); missing `strict: true` in both
-  tsconfigs (added; an unsound `catch (e: Error)` became a proper
-  `catch (e: unknown)` narrowed via `instanceof Error`).
-- **A real, unrelated infrastructure bug was found and fixed this
-  session**: running `npm install` inside `web/` shifted the session's
-  shared shell cwd, which broke `.claude/settings.json`'s
-  PreToolUse/PostToolUse hooks (they invoked `python
-  .claude/hooks/*.py` via a relative path) for every subsequent
-  Bash/PowerShell call, project-wide, not just for this slice. Fixed:
-  hook commands now resolve the repo root via `$(git rev-parse
-  --show-toplevel)`; `capture_commit.py`'s own new use of that same git
-  call is guarded the same way its neighboring call already was. This
-  was flagged explicitly at Gate 2 as an out-of-brief but necessary
-  change, not smuggled into the diff.
-- Full gate record (all five checks green, verdict accept):
-  artifacts/reviews/2026-08-05-react-vite-scaffold.md.
+- **The frontend's write path now works end-to-end in a real browser.**
+  `web/src/api.ts` gained `postConversationMessage(conversationId,
+  question)`: POSTs to `/api/conversations/{id}/messages`, drains the
+  endpoint's single-event SSE response (buffers to `done`, then parses the
+  one `event:`/`data:` frame), and resolves with `{conversation_id,
+  message_id, sql, rows}` or throws (using the backend's `detail` on an
+  `event: error`, or a plain status-code message on a non-2xx HTTP
+  response).
+- **`ConversationDetailView` (`web/src/App.tsx`) gained a compose form** —
+  a text input + submit button with its own `question`/`sending`/
+  `sendError` state, fully independent of the page's `loading`/`error`
+  state. On submit: calls `postConversationMessage`; on success clears the
+  input and calls a new `onMessageSent` prop; on failure shows an inline
+  error and leaves the question text and the already-rendered conversation
+  untouched.
+- **`App` gained a `refreshKey` counter** added to the existing detail-fetch
+  `useEffect`'s dependency array — `onMessageSent` bumps it to re-trigger
+  that same effect (reusing its existing `stale`-flag race guard) rather
+  than building a second fetch-and-set path.
+- **Gate 2's no-slop pass caught and fixed a real regression**: the
+  original render gate (`{!loading && !error && selectedId !== null &&
+  selectedConversation && <ConversationDetailView .../>}`) unmounted the
+  entire detail view — compose form included — on every post-send refresh,
+  because re-triggering the effect flips `loading` back to `true`. That is
+  exactly the "must not blank out the already-loaded conversation"
+  behavior the brief's own Constraints forbid, just on the success path
+  rather than during the send. Fixed: the detail view now renders whenever
+  `selectedConversation` is populated, regardless of `loading`
+  (`web/src/App.tsx:182`); the page-level "Loading…" text was narrowed to
+  `loading && !selectedConversation` so first-load behavior is unchanged.
+  Confirmed fixed by direct inspection and by a second no-slop pass.
+- **Proven end-to-end twice** (before and after the fix), in a real
+  browser via headless Chrome driven directly over the DevTools Protocol
+  (chromium-cli/Playwright still unavailable in this environment — same
+  workaround as the scaffold slice), against a real uvicorn backend (the
+  project's own `.venv`, NOT the shell's default `python`/`uvicorn`, which
+  resolved to an unrelated venv missing `sqlalchemy` — worth remembering
+  next session) and a real Vite dev server:
+  - Success path: a real question got a real streamed answer (96,478
+    delivered orders, matching `evals/questions.yaml`'s independently
+    verified value for the same question); message count went from 2 to
+    4; input cleared; zero console errors.
+  - Continuous-mount proof: polled the DOM every 250ms across a full real
+    send (13 samples) — form and message list present in every sample,
+    the blocking "Loading…" text never appeared once.
+  - Failure path: backend process killed, then submitted — inline "Error:
+    Failed to fetch" shown, question preserved, message count/form/list
+    unchanged across 8s of 300ms-interval polling.
+  - All throwaway processes (uvicorn, Vite, headless Chrome) stopped
+    afterward; ports confirmed free via `netstat`.
+- Full gate record (all five checks green, verdict accept, includes the
+  caught-and-fixed regression): artifacts/reviews/2026-08-05-message-composing.md.
+- Also this session: rewrote `README.md`, which had been left as the
+  generic FDE-starter-kit template describing the kit's own tooling rather
+  than InsightPilot itself — it now documents the actual project (purpose,
+  pipeline, architecture, key features, accurate setup steps verified
+  against the real scripts, usage examples, project structure). Commit
+  `2bd3084`.
 
 ## Proof
 ```
@@ -81,76 +77,90 @@ transforming...✓ 16 modules transformed.
 rendering chunks...
 computing gzip size...
 dist/index.html                   0.46 kB │ gzip:  0.29 kB
-dist/assets/index-D7EbC3tu.css    5.34 kB │ gzip:  1.85 kB
-dist/assets/index-DvBiDm5a.js   143.11 kB │ gzip: 46.59 kB
+dist/assets/index-BWc6qn3o.css    5.87 kB │ gzip:  1.97 kB
+dist/assets/index-BW-TLQ3c.js   144.64 kB │ gzip: 47.22 kB
 
-✓ built in 1.11s
+✓ built in 2.34s
 ```
-Live shipping proof (uvicorn + Vite dev server + headless Chrome over
-CDP, outside the build check):
+Live shipping proof (post-fix, real send, 250ms-interval DOM polling):
 ```
-$ curl -s http://localhost:8000/api/conversations | python -c "..."
-22   # real conversations from prior slices' shipping proofs
-
-$ node drive.mjs ws://localhost:9222/devtools/browser/... list.png detail.png
-CLICK_RESULT: CLICKED: Untitled | #155 · 8/5/2026, 11:46:21 AM
-CONSOLE_ERRORS: []
+MESSAGE_COUNT_BEFORE: 6
+SAMPLES_TAKEN: 18 (every 250ms)
+EVER_UNMOUNTED_FORM_OR_LIST: false
+EVER_SHOWED_STANDALONE_LOADING_TEXT: false
+FINAL_SAMPLE: {"formPresent":true,"listPresent":true,"messageCount":8,
+  "buttonLabel":"Send","loadingTextPresent":false}
 ```
-List-view and detail-view screenshots (real data, real click) reviewed
-directly this session. Throwaway servers stopped afterward; ports
-confirmed free via `netstat`.
+Live failure-path proof (backend killed, then submit, 300ms-interval polling):
+```
+MESSAGE_COUNT_BEFORE: 8
+EVER_UNMOUNTED: false
+FINAL_SAMPLE: {"formPresent":true,"listPresent":true,"messageCount":8,
+  "buttonLabel":"Send","errorText":"Error: Failed to fetch",
+  "inputValue":"this should fail, backend killed just now"}
+```
+Full transcripts (including the real streamed answer's SQL/rows and the
+before-fix regression evidence) in the gate record.
 
 ## Open questions / known issues
-- **M5 (Chat UI) has its first slice done: the scaffold and a read-only
-  page.** Message composing, SSE consumption, ECharts rendering, and
-  shadcn/ui components are all still unbuilt — see the brief below for
-  the next one.
-- **No frontend test runner exists** — carried over from this slice's own
-  brief; live browser verification (this session, via CDP since
-  chromium-cli/Playwright are unavailable here) is standing in for it at
-  Gate 2, same as backend shipping proof has always done.
-- **`chromium-cli` and Playwright are both unavailable in this
-  environment** — this session drove headless Chrome directly over the
-  DevTools Protocol with a small one-off Node script instead (using
-  Node's built-in global `WebSocket`, no new dependency). Future
-  browser-driven shipping proofs in this repo will need the same
-  workaround unless one of those tools gets installed — that would be a
-  new dependency decision, not to make silently.
+- **M5 (Chat UI) has its second slice done: read-only scaffold, then
+  message composing (the write/streaming path).** Chart rendering
+  (ECharts), the collapsed "View SQL" explanation section, follow-up
+  chips, and starter questions are all still unbuilt — and, more
+  fundamentally, **the backend's "analyze & respond" step (PRD.md F2 step
+  6 / §9 item 4) has never been built**: `app/pipeline/answer.py`'s
+  `get_answer()` still returns only `(sql, rows)`; there is no
+  `prompts/analyze.md` and no `summary`/`explanation`/`chart_spec`/
+  `follow_ups` anywhere in the pipeline yet. This is the next brief below
+  — a backend-only slice, deliberately not wired into `get_answer()`/
+  `app/main.py`/persistence/frontend yet, matching how `generate_sql.py`
+  was originally built and proven standalone before later slices wired it
+  into the full pipeline.
+- **A render-gate/loading-flag pattern to watch**: this slice's one caught
+  regression was a `useEffect` re-trigger (for a background refresh)
+  flipping a `loading` flag that a render gate treated as "nothing to
+  show yet," unmounting an already-populated view. First occurrence in
+  this project — distinct from the scaffold slice's stale-response *race*
+  (out-of-order fetches, not a loading-flag/render-gate interaction) — not
+  yet promoted to CLAUDE.md/no-slop.md per the ratchet's second-occurrence
+  rule, but worth naming explicitly if any future slice adds a background
+  refresh to an already-rendered, `loading`-gated view.
+- **The project's own `.venv` (Python 3.11.15) must be used explicitly for
+  `uvicorn`/backend commands** — this session's shell had a *different*
+  default `python`/`uvicorn` on PATH (missing `sqlalchemy` entirely, from
+  an unrelated environment) that silently shadowed the project's own
+  virtualenv. Any future session running the backend directly (not via
+  Docker) should invoke `.venv/Scripts/python.exe -m uvicorn ...`
+  explicitly rather than trusting a bare `uvicorn`/`python` on PATH.
+- **No frontend test runner exists** — carried over from the scaffold
+  slice; live browser verification (via CDP, since chromium-cli/Playwright
+  are unavailable here) continues to stand in for it at Gate 2.
 - **API base URL is a hardcoded `http://localhost:8000` constant** in
-  `web/src/api.ts` — open design debt from this slice's design note,
-  revisit only if a later slice needs configurable environments (e.g. a
-  real deploy target).
-- **What happens to an already-computed answer when its persistence
-  write fails**: unchanged, carried over from three slices ago — a plain
-  500 for `/api/ask`, a silently truncated SSE stream for
-  `/api/ask/stream` and `/api/conversations/{id}/messages`. Not yet
-  decided whether this needs a real fix; the next slice's SSE consumption
-  will be the first frontend code to actually observe this behavior.
-- **`NullPool` needs re-evaluation once this pool serves live HTTP
-  requests** under uvicorn's single persistent event loop — still
-  flagged in `app/db/session.py`'s own comment, still not acted on.
+  `web/src/api.ts` — open design debt, revisit only if a later slice needs
+  configurable environments.
+- **What happens to an already-computed answer when its persistence write
+  fails**: unchanged, still a plain 500 for `/api/ask`, a silently
+  truncated SSE stream for `/api/ask/stream` and
+  `/api/conversations/{id}/messages`. Not yet decided whether this needs a
+  real fix.
+- **`NullPool` needs re-evaluation** once this pool serves live HTTP
+  requests under uvicorn's single persistent event loop — still flagged in
+  `app/db/session.py`'s own comment, still not acted on.
 - **Real installed Python is 3.11.15** (`.venv`), not the 3.12
   ARCHITECT.md names — carried over, not investigated or acted on.
 - **Decimal-valued rows still serialize as JSON strings, not numbers** —
-  carried over unchanged; the new frontend currently renders
-  `content_json` as raw JSON text, so this is visible as-is in the UI
-  now, not previously.
+  carried over unchanged, visible in the frontend's raw `content_json`
+  rendering.
 - **`plans/logs/_auto-capture.md` remains silently uncommitted across
-  every commit** (pre-existing workflow gap) — flagged for 9+ commits
-  now with no fix proposed; this session's two commits correctly
-  exclude/include it per the established pattern.
+  every commit** (pre-existing workflow gap) — flagged for 10+ commits now
+  with no fix proposed.
 - `tests/test_seed_idempotency.py`'s own real Postgres deadlock (M1-era,
   unrelated code) remains uninvestigated.
 - The doubled-Voyage-call-per-question design cost
   (`app/pipeline/generate_sql.py`) remains unoptimized — accepted,
   documented in code.
 - Lint/type tooling on the Python side (`ruff`, `mypy`) remains
-  unaddressed, carried over from every prior slice. The frontend now has
-  its own type-checking (`tsc -b` under `strict: true`, part of `npm run
-  build`) but no separate linter (this slice's no-slop pass removed the
-  Vite template's bundled `oxlint` as an unapproved dependency) — a
-  frontend linter, if wanted, is a new-dependency decision for a future
-  slice to make explicitly, not a gap to silently fill.
+  unaddressed, carried over from every prior slice.
 - The concurrency-safety pattern (session-scoped advisory locks) is still
   scoped to exactly the two test classes it was originally applied to.
 - Starlette's `TestClient` still emits the `httpx2` deprecation warning —
@@ -160,69 +170,79 @@ confirmed free via `netstat`.
 
 ## Next slice (the brief, written NOW while context is hot)
 Goal:
-Wire up message composing into the existing `web/` page: a text input in
-the conversation detail view that `POST`s a new question to
-`/api/conversations/{id}/messages`, consumes its SSE response, and shows
-the new user/assistant messages in the list — proving the write/streaming
-path works end-to-end in the browser for the first time, still with
-plain (no-chart) rendering.
+Add a new `analyze_answer(question, sql, rows)` pipeline step (PRD.md F2
+step 6 / §9 item 4 — the last unbuilt piece of the text-to-SQL pipeline)
+that makes one Claude call with the question, the executed SQL, and a
+sample of its result rows, and returns a Pydantic-validated `{summary,
+explanation, chart_spec, follow_ups}` object — proven standalone via its
+own verify script, deliberately NOT wired into `get_answer()`, `app/main.py`,
+message persistence, or the frontend yet.
 
 Constraints:
-- No ECharts, no chart rendering — same as the scaffold slice, still
-  deferred; the new assistant message's `content_json` renders the same
-  `<pre>`-formatted-JSON way every other message already does.
-- No shadcn/ui, no routing library — same deferrals as the scaffold
-  slice, still not earned.
-- No new frontend or backend dependencies. The browser has no native way
-  to consume an SSE stream from a `POST` request (`EventSource` is
-  GET-only), so this slice hand-rolls a small SSE-frame parser
-  (`event: ...\ndata: ...\n\n` blocks) over a `fetch()` `ReadableStream`
-  reader in `web/src/api.ts` — a browser API, not a library.
-- After a successful send, re-fetch the conversation detail
-  (`fetchConversation`, already built) rather than hand-constructing the
-  new message objects client-side — the backend is the single source of
-  truth for message ids/timestamps, and this avoids a second,
-  hand-maintained shape for "a message" in the frontend.
-- The compose input's loading/error state must be independent of the
-  page's existing detail-load loading/error state — sending a second
-  message must not blank out the already-loaded conversation.
-- No backend changes — `POST /api/conversations/{id}/messages` and its
-  SSE contract are already built and unchanged by this slice.
+- No new dependencies; reuse the exact `anthropic`/`pydantic` call pattern
+  `app/pipeline/generate_sql.py`'s `call_llm_for_sql()`/`GenerateSqlResponse`
+  already establish (one Claude call, JSON parsed via
+  `app/catalog/describe.py`'s `extract_json_object`, Pydantic validation
+  with exactly one retry, `MAX_RETRIES = 1`, raising loudly — no
+  placeholder — if both attempts fail).
+- New prompt file `prompts/analyze.md`, `string.Template`-based like
+  `generate_sql.md`/`repair_sql.md` — prompts stay versioned repo files,
+  never inline strings (ARCHITECT.md).
+- The result rows fed into the prompt must be capped to a small sample
+  (do not serialize the full up-to-1000-row result into the prompt) —
+  exact cap size to propose at Gate 1, informed by PRD F1's existing
+  50-row display cap as a reasonable ceiling.
+- `chart_spec` is validated only as a present JSON object
+  (`dict[str, Any]`) this slice — its concrete chart-type/axis-mapping
+  schema is deliberately deferred to whichever future slice actually
+  renders it (ECharts); designing that schema now, with no consumer,
+  would be speculative.
+- `follow_ups` validated as a non-empty list of strings (PRD F1: "3-5
+  suggested follow-up questions").
+- Exact module path: `app/pipeline/analyze_answer.py`, matching
+  `generate_sql.py`/`validate_sql.py`/`execute_sql.py`/`repair_sql.py`'s
+  one-file-per-pipeline-step convention.
+- Must NOT change `get_answer()`, `app/main.py`, message persistence, or
+  any frontend file this slice — wiring is explicitly a later slice's job,
+  so this one stays reviewable and its own contract is provable in
+  isolation, matching how `generate_sql.py` was originally built and
+  proven alone before later slices wired it into the full pipeline.
 
 Inputs:
-- `web/src/api.ts` (`fetchConversation`, existing types) and
-  `web/src/App.tsx` (`ConversationDetailView`) — where the input and its
-  handler are added.
-- The existing `POST /api/conversations/{id}/messages` SSE endpoint
-  (`app/main.py`, `_conversation_message_stream_events`), unchanged this
-  slice: emits exactly one `event: result` (with `conversation_id`,
-  `message_id`, `sql`, `rows`) or one `event: error` (with `detail`), then
-  closes the stream.
-- PRD.md §8's API surface, ARCHITECT.md's SSE-not-WebSockets decision.
+- PRD.md F2 step 6 and §9 item 4 (`analyze.md`: "question + SQL + result
+  sample → JSON: {summary, explanation, chart_spec, follow_ups[]}").
+- `app/pipeline/generate_sql.py` (`call_llm_for_sql`, `GenerateSqlResponse`,
+  `PROMPT_TEMPLATE`/`PROMPT_FILE`/`DEFAULT_MODEL`/`MAX_RETRIES` convention)
+  and `app/catalog/describe.py` (`extract_json_object`) as the patterns to
+  mirror exactly.
+- `app/pipeline/answer.py`'s `get_answer()` return shape (`sql, rows`) —
+  the exact input shape `analyze_answer()` must accept, so a later slice
+  can wire `analyze_answer(question, sql, rows)` in directly.
 
 Outputs:
-- `web/src/api.ts` gains a function that `POST`s a question to
-  `/api/conversations/{id}/messages`, reads the `fetch()` response body
-  stream, parses out the one `result`/`error` SSE event, and either
-  resolves or throws.
-- `web/src/App.tsx`'s detail view gains a text input + submit control;
-  on submit it calls that function, then re-fetches and re-renders the
-  conversation detail on success, or shows an inline error (without
-  discarding the already-loaded message list) on failure.
+- `prompts/analyze.md`.
+- `AnalyzeResponse` Pydantic model: `summary: str`, `explanation: str`,
+  `chart_spec: dict[str, Any]`, `follow_ups: list[str]`.
+- `app/pipeline/analyze_answer.py`: `analyze_answer(question, sql, rows) ->
+  AnalyzeResponse`.
+- `app/pipeline/verify_analyze_answer.py`: the done-check script — calls
+  the real `get_answer()` for `FIXED_QUESTION` to get a real `(sql, rows)`
+  pair (not hand-faked input), passes it to `analyze_answer()`, and
+  asserts the result satisfies `AnalyzeResponse` with non-empty
+  `summary`/`explanation`/`follow_ups` and a `chart_spec` dict.
 
 Done-check:
-`cd web && npm run build` exits 0, pasted fresh, in one sitting. (Same
-role as the scaffold slice: no frontend test runner yet; live
-browser verification — typing a real question, watching it stream back,
-seeing it persist across a re-fetch — happens at Gate 2's shipping-proof
-check via the same CDP-driven approach this session used.)
+`python -m app.pipeline.verify_analyze_answer` exits 0, pasted fresh.
 
 Out-of-scope:
-- ECharts / chart rendering, shadcn/ui components, a routing library —
-  all still deferred, same as the scaffold slice.
-- Editing or deleting a sent message; retry-on-failure beyond a plain
-  error message; multiple conversations open at once.
-- Any backend change — the SSE endpoint's contract is fixed input this
-  slice.
-- Docker-compose "web" service wiring, production build config,
-  deployment, auth screens, the dashboard page (F6/M6).
+- Wiring `analyze_answer()` into `get_answer()`, `app/main.py`'s response
+  models, message persistence, or any frontend rendering (charts,
+  follow-up chips, the "View SQL" explanation section) — later slice(s),
+  once this step's own contract is proven in isolation.
+- Designing `chart_spec`'s concrete schema beyond "a JSON object" —
+  deferred to the slice that actually renders it.
+- Any change to `evals/questions.yaml`/`evals/run.py` — they test
+  `get_answer()`'s SQL-correctness only, and `analyze_answer()` isn't
+  wired into that call path yet, so there is nothing for this slice to
+  regress or meaningfully extend there.
+- `explain_sql.md` (PRD §9 item 5) — a separate prompt/step, not this one.
