@@ -54,24 +54,32 @@ export interface ConversationMessageResult {
 export interface AssistantContent {
   rows: Record<string, unknown>[]
   chartSpec: Record<string, unknown>
+  sql: string
+  explanation: string
 }
 
 // content_json holds {question} for user messages and {sql, rows, analysis}
 // for assistant ones, so MessageDetail can't type it narrower -- this is the
 // one runtime check that a given message actually has the shape ChartView
-// needs, before ChartView does its own bar-specific resolution.
+// and SqlDetails need, before each does its own further resolution.
 export function asAssistantContent(
   contentJson: Record<string, unknown>,
 ): AssistantContent | null {
   const rows = contentJson.rows
   const analysis = contentJson.analysis
+  const sql = contentJson.sql
   if (!Array.isArray(rows)) return null
   if (typeof analysis !== 'object' || analysis === null) return null
+  if (typeof sql !== 'string') return null
   const chartSpec = (analysis as Record<string, unknown>).chart_spec
   if (typeof chartSpec !== 'object' || chartSpec === null) return null
+  const explanation = (analysis as Record<string, unknown>).explanation
+  if (typeof explanation !== 'string') return null
   return {
     rows: rows as Record<string, unknown>[],
     chartSpec: chartSpec as Record<string, unknown>,
+    sql,
+    explanation,
   }
 }
 
