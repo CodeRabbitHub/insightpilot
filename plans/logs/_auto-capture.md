@@ -1416,3 +1416,145 @@ Date:   Wed Aug 5 12:37:34 2026 +0530
  plans/logs/2026-08-05-react-vite-scaffold.md | 76 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  1 file changed, 76 insertions(+)
 ```
+
+## Commit at 2026-08-05 12:39
+```
+commit 79cc5f509745dbb9de00e89b9c8fdd52777261af
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 12:39:35 2026 +0530
+
+    Handoff: react-vite-scaffold slice done, next brief is message composing + SSE
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md                  | 352 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------------------------------------------------------------
+ plans/logs/_auto-capture.md |  85 ++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 263 insertions(+), 174 deletions(-)
+```
+
+## Commit at 2026-08-05 12:54
+```
+commit 2bd3084883e713b6906d08d3d000e0222035193e
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 12:54:17 2026 +0530
+
+    Rewrite README to document InsightPilot instead of the starter-kit template
+    
+    The README still described the generic FDE Starter Kit scaffolding used
+    to bootstrap this repo, not InsightPilot itself. Replaced it with the
+    project's actual purpose, pipeline, architecture, key features, setup
+    steps, and usage examples so a newcomer can understand and run it.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ README.md | 278 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--------------------------------
+ 1 file changed, 232 insertions(+), 46 deletions(-)
+```
+
+## Commit at 2026-08-05 13:27
+```
+commit b05c7952e8a94132d8eaa2e037279cbf22e0bf33
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 13:27:48 2026 +0530
+
+    Add message composing to the conversation detail view
+    
+    Wires up the first write path in the frontend: a text input POSTs a new
+    question to /api/conversations/{id}/messages, drains its single-event SSE
+    response, and re-fetches the conversation to show the new user/assistant
+    messages -- proving the write/streaming path works end-to-end in a real
+    browser. Gate caught and fixed a render-gate bug where the post-send
+    refresh briefly unmounted the whole detail view (compose form included),
+    which violated the brief's own must-not-blank-the-view constraint.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ artifacts/design/2026-08-05-message-composing.md  |  62 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-05-message-composing.md | 148 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-05-message-composing.md      |  74 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/src/App.tsx                                   |  53 ++++++++++++++++++++++++++++++++++++++++++++++++++---
+ web/src/api.ts                                    |  56 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 390 insertions(+), 3 deletions(-)
+```
+
+## Commit at 2026-08-05 13:29
+```
+commit a68b74e0e1f758ee7c9569e4727011a52b082931
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 13:29:15 2026 +0530
+
+    Capture: message-composing slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-05-message-composing.md | 97 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 97 insertions(+)
+```
+
+## Commit at 2026-08-05 13:32
+```
+commit 1443bca97380088ff863b93af88b043c0d5c933c
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 13:32:01 2026 +0530
+
+    Handoff: message-composing slice done, next brief is analyze_answer pipeline step
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ HANDOFF.md | 368 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++------------------------------------------------------------------------------------------
+ 1 file changed, 194 insertions(+), 174 deletions(-)
+```
+
+## Commit at 2026-08-05 17:54
+```
+commit 027a7cf2b72804c3ffe5ce349c66c05bb2af5189
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 17:53:59 2026 +0530
+
+    Add analyze_answer pipeline step: summary/explanation/chart_spec/follow_ups
+    
+    Completes the last unbuilt link of the text-to-SQL pipeline (PRD F2 step
+    6 / Section 9 item 4). analyze_answer(question, sql, rows) makes one
+    Claude call (prompts/analyze.md) with the question, executed SQL, and a
+    20-row-capped sample of the result, returning a Pydantic-validated
+    AnalyzeResponse {summary, explanation, chart_spec, follow_ups} -- same
+    one-retry/extract_json_object/no-placeholder-fallback pattern as
+    generate_sql.py's call_llm_for_sql(). verify_analyze_answer.py is the
+    done-check: chains a real get_answer(FIXED_QUESTION) into a real
+    analyze_answer() call. Deliberately not wired into get_answer(),
+    app/main.py, persistence, or the frontend this slice.
+    
+    Gate 2 caught and fixed four real issues before accept: prompts/analyze.md
+    shipped with no matching evals/*.md case (added evals/analyze_answer.md,
+    two real cases including a single-scalar result proving chart_spec isn't
+    fabricated when nothing is chartable); the row-cap Constraint was only
+    tested behaviorally, not structurally (added BuildPromptRowCappingTests);
+    verify_analyze_answer.py had no try/except matching verify_answer.py's
+    PASSED/FAILED convention (added); and the full test suite itself surfaced
+    a real bug -- response.content[0].text assumed the first content block is
+    always text, but Claude can prepend a ThinkingBlock, breaking both retry
+    attempts identically -- fixed via a new _extract_response_text() helper
+    scoped to this file (the same fragile pattern remains unfixed in
+    generate_sql.py/repair_sql.py/describe.py, flagged as pre-existing and
+    out of scope here). Gate record: artifacts/reviews/2026-08-05-analyze-answer.md.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ app/pipeline/analyze_answer.py                 |  95 +++++++++++++++++++++++++++++++++++++++
+ app/pipeline/verify_analyze_answer.py          |  53 ++++++++++++++++++++++
+ artifacts/reviews/2026-08-05-analyze-answer.md | 226 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ evals/analyze_answer.md                        |  65 +++++++++++++++++++++++++++
+ plans/briefs/2026-08-05-analyze-answer.md      |  95 +++++++++++++++++++++++++++++++++++++++
+ prompts/analyze.md                             |  38 ++++++++++++++++
+ tests/_analyze_answer_helpers.py               |  33 ++++++++++++++
+ tests/test_analyze_answer.py                   | 374 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_analyze_answer_prompt_file.py       | 152 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_verify_analyze_answer_script.py     |  73 ++++++++++++++++++++++++++++++
+ 10 files changed, 1204 insertions(+)
+```
