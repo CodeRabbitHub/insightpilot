@@ -1310,3 +1310,24 @@ Date:   Wed Aug 5 04:09:55 2026 +0530
  tests/test_api_conversations_read.py                         | 607 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  4 files changed, 882 insertions(+)
 ```
+
+## Commit at 2026-08-05 11:42
+```
+commit 41e1e9716a6ff8fdd48a725e5e19f0fcf86436cc
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 11:42:49 2026 +0530
+
+    Capture: conversations-read-endpoints slice log
+    
+    Slice log for the conversations-read-endpoints slice (commit c7e4700):
+    one thing rejected/changed (an untested zero-messages detail case,
+    caught by the already-promoted "untested edges" no-slop category), no
+    new pattern to promote.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01TH1p8fxBmrWtNJB18djsDk
+
+ plans/logs/2026-08-05-conversations-read-endpoints.md | 58 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                           | 64 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 122 insertions(+)
+```
