@@ -1,54 +1,79 @@
 # Handoff
 
 Date: 2026-08-06
-Slice just completed: plans/briefs/2026-08-06-pin-dashboard-card-endpoint.md
-  + plans/logs/2026-08-06-pin-dashboard-card-endpoint.md
-  (commit 089c0d4, capture 5780d7c)
+Slice just completed: plans/briefs/2026-08-06-dashboard-fresh-on-view-get.md
+  + plans/logs/2026-08-06-dashboard-fresh-on-view-get.md
+  (commit 8da3f8c, capture c94c5c9)
 
 ## State of the work
 
-- **`app/main.py` gains `POST /api/dashboards/{dashboard_id}/cards`**:
-  given a JSON body of `title`, `question_text`, `sql_text`,
-  `chart_spec_json`, `position`, it creates one `DashboardCard` row
-  under `dashboard_id` and returns it (`id`, `dashboard_id`, `title`,
-  `question_text`, `sql_text`, `chart_spec_json`, `position`,
-  `created_at`); 404s with `{"detail": "dashboard not found"}` and zero
-  DB writes if `dashboard_id` doesn't refer to a real `Dashboard` row.
-- Two new Pydantic models back it: `CreateDashboardCardRequest` (the
-  request body) and `DashboardCardDetail` (the response), following
-  this file's existing `*Request`/`*Detail` naming.
-- Implementation mirrors two existing patterns exactly:
-  `create_conversation`'s insert-flush-commit-return shape, and
-  `post_conversation_message`'s check-existence-then-404-with-zero-writes
-  shape (`session.get(Dashboard, dashboard_id)` before ever constructing
-  the new row).
-- **No new pool, no new dependency, no SQL execution/sqlglot
-  validation at pin time** — `sql_text` is stored as an opaque string,
-  per the brief's Constraints; validation/execution is deferred to the
-  not-yet-built fresh-on-view `GET /api/dashboards/{id}` endpoint.
-- **`tests/test_api_dashboard_cards.py` (new, 12 tests)**: a real
-  `fastapi.testclient.TestClient` round-trip against the real dev
-  Postgres (no mocking) — happy path pins a card under the seeded
-  Overview dashboard, asserts the exact 8-field response shape
-  (including a nested `chart_spec_json` dict round-tripping unchanged),
-  asserts the row is visible in a brand-new session, cleans up, and
-  confirms the Overview dashboard itself survives; a second test class
-  asserts an unknown sentinel dashboard id (`999_999_999`) 404s with
-  zero `DashboardCard` rows written.
+- **`app/main.py` gains `GET /api/dashboards/{dashboard_id}`**: 404s with
+  `{"detail": "dashboard not found"}` if the id doesn't exist; otherwise
+  returns the dashboard's own fields (`id`, `name`, `created_at`) plus
+  every pinned `DashboardCard` under it, ordered by `position` ascending
+  — proven against out-of-order insertion, not just insertion/id order.
+- Each returned card carries the persisted fields
+  (`id`, `dashboard_id`, `title`, `question_text`, `sql_text`,
+  `chart_spec_json`, `position`, `created_at`) plus a fresh `rows` field,
+  obtained by re-validating (sqlglot via `app.catalog.sync.connect()`)
+  and re-executing (the read-only asyncpg pool) that card's persisted
+  `sql_text` on every single request — reusing
+  `app/pipeline/answer.py`'s `_validate_and_execute(sql)` directly, no
+  `repair_sql()`, no LLM call. `chart_spec_json` is returned unchanged,
+  exactly as pinned. Proven fresh-not-cached by asserting the response's
+  `rows` for one card match an independent, separately-invoked
+  `execute_sql()` call on the same `sql_text`.
+- If any one card's `sql_text` now fails validation or execution (e.g.
+  schema drift since it was pinned), the *whole* request fails with 502
+  (`HTTPException(status_code=502, detail=str(exc))`, matching `/api/ask`'s
+  upstream-pipeline-failure convention) — never a 200 with that card
+  silently dropped, proven by a test that deliberately pins a card
+  referencing a nonexistent table and asserts both the 502 and the
+  absence of any `cards` field in that error body.
+- Two new Pydantic models back it: `DashboardCardWithRows` (extends the
+  existing `DashboardCardDetail` with `rows: list[dict[str, Any]]`) and
+  `DashboardDetail` (`id`, `name`, `created_at`, `cards`).
+- **No new pool, no new dependency**: the app-schema read
+  (`Dashboard`/`DashboardCard` via `async_session_factory`) is fully
+  closed out before any card's SQL is validated/executed, so it never
+  overlaps with the two SQL pools `_validate_and_execute()` uses.
+  Existing `POST /api/dashboards/{id}/cards` is completely untouched.
+- **`tests/test_api_dashboard_cards.py` gains 19 new tests** (31 total in
+  the file) across four classes: happy path (ordering + freshness proof,
+  ≥2 cards inserted out of position order), zero-own-cards (the
+  empty-list code path, without asserting exact global emptiness since
+  the seeded Overview dashboard is shared with concurrently-running
+  suites), unknown-id 404, and deliberately-broken-SQL 502. Every test
+  that creates a `DashboardCard` cleans it up; none ever deletes the
+  seeded Overview dashboard row itself.
 - **Gate 2 all five checks green** (full record:
-  `artifacts/reviews/2026-08-06-pin-dashboard-card-endpoint.md`). No-slop
-  review surfaced two low-severity stylistic deviations from "mirror
-  exactly" (response built right after `flush()` rather than after
-  `commit()`; the 404 raised inside the session's `async with` block
-  rather than after it closes) — both accepted as-is, proven harmless by
-  the passing real-DB tests rather than just asserted. First occurrence
-  of this exact shape; not yet promoted to `templates/no-slop.md` (see
-  the slice log for the reasoning — promote if it recurs).
+  `artifacts/reviews/2026-08-06-dashboard-fresh-on-view-get.md`).
+  No-slop review's one finding — the 404 raised inside an open
+  `async with session:` block, the second occurrence of a shape flagged
+  as a stylistic deviation in the prior slice — was resolved by fixing
+  `templates/no-slop.md` itself (category 7 gained a line), not the
+  code: on inspection this is already the codebase's majority shape
+  (`get_conversation`, `create_dashboard_card`, now `get_dashboard`);
+  only `post_conversation_message` closes the session first, for an
+  LLM-streaming-specific reason of its own. Future no-slop passes should
+  no longer flag raise-inside as a deviation.
 - **Shipping proof went beyond `TestClient`**: a real `uvicorn` dev
-  server was started, hit with real `curl` POSTs (happy path returned a
-  real card with a real `created_at` timestamp; unknown id returned a
-  real 404), then the proof row was deleted and the Overview dashboard
-  confirmed still present.
+  server was started and hit with real `curl` — pinned a real card,
+  GET'd it back with real `rows` (`select count(*) from olist.orders`
+  → `{"count":99441}`), confirmed 404 on an unknown id, pinned a second
+  card referencing a nonexistent table and confirmed the GET now 502s
+  the whole request, then deleted both proof cards and confirmed the
+  Overview dashboard renders clean (`cards: []`) again.
+- **Environment note, not a code issue**: the dev Postgres container
+  was down at the start of this session (Docker Desktop's daemon
+  wasn't running at all) — every test failure traced to
+  `ConnectionRefusedError`/`OperationalError` on port 5433. Fixed by
+  starting Docker Desktop and `docker compose up -d`; confirmed root
+  cause by re-running the identical suite before/after with the diff
+  itself unchanged. A separate mid-session `stop_verify` failure in
+  `test_wire_analyze_answer.py` (a file this slice never touches) was a
+  transient `VoyageAI` `RemoteDisconnected` network blip, confirmed
+  transient by re-running that file alone afterward (13/13 passed).
 
 ## Proof
 
@@ -64,32 +89,50 @@ test_response_id_is_an_int ... ok
 test_response_position_matches_the_posted_value ... ok
 test_returns_200 ... ok
 test_row_really_exists_in_a_fresh_session_with_the_posted_values ... ok
+test_502_response_body_has_a_detail_string ... ok
+test_502_response_body_has_no_cards_field ... ok
+test_returns_502_not_200 ... ok
+test_cards_are_ordered_by_position_ascending_not_insertion_order ... ok
+test_each_card_echoes_its_persisted_fields_unchanged ... ok
+test_every_card_in_the_response_has_exactly_the_persisted_fields_plus_rows ... ok
+test_response_has_exactly_the_dashboard_level_fields ... ok
+test_response_id_and_name_match_the_seeded_overview_dashboard ... ok
+test_response_includes_both_cards_this_test_pinned ... ok
+test_rows_field_is_a_nonempty_list_of_dicts ... ok
+test_rows_match_an_independent_real_execute_sql_call_on_the_same_sql_text ... ok
+test_cards_field_is_a_list ... ok
+test_404_response_body_has_a_detail_string ... ok
 test_persists_no_dashboard_card_rows_for_that_dashboard_id ... ok
 test_returns_404 ... ok
 
-Ran 12 tests in 1.351s
+----------------------------------------------------------------------
+Ran 31 tests in 6.017s
 
 OK
 ```
 
 Real-server shipping proof (independent of `TestClient`):
 ```
-=== POST /api/dashboards/1/cards (real uvicorn, real curl) ===
-HTTP/1.1 200 OK
-{"id":56,"dashboard_id":1,"title":"Gate shipping-proof card", ...,
- "created_at":"2026-08-06T07:08:17.990623Z"}
+=== POST a real card onto Overview (dashboard 1) ===
+HTTP 200: {"id":399,...,"sql_text":"select count(*) from olist.orders",...}
 
-=== POST /api/dashboards/999999999/cards ===
-HTTP/1.1 404 Not Found
-{"detail":"dashboard not found"}
+=== GET /api/dashboards/1 ===
+HTTP 200: {"id":1,"name":"Overview",...,"cards":[{"id":399,...,"rows":[{"count":99441}]}]}
+
+=== GET /api/dashboards/999999999 ===
+HTTP 404: {"detail":"dashboard not found"}
+
+=== POST a card with broken SQL (select * from nonexistent_table) ===
+HTTP 200 (pin succeeds -- storage is opaque)
+
+=== GET /api/dashboards/1 (now with the broken card pinned) ===
+HTTP 502: {"detail":"unknown table(s) referenced: olist.nonexistent_table"}
 ```
+Both proof cards deleted afterward; Overview dashboard confirmed still
+present and clean (`cards: []`).
 
 ## Open questions / known issues
 
-- The two accepted no-slop stylistic deviations above (build-before-
-  commit; raise-404-inside-block) are a first occurrence — if a future
-  slice's no-slop pass flags either shape again, promote it into
-  `templates/no-slop.md` per the ratchet rule.
 - Carried over, unchanged from the previous handoff (still true, still
   unaddressed):
   - Frontend unit tests still exist but cannot execute — no
@@ -127,84 +170,79 @@ HTTP/1.1 404 Not Found
     `users` doesn't exist yet (F8).
   - `queries` table (PRD §7's fourth `app`-schema table) still doesn't
     exist — not needed until the pipeline-logging slice.
-  - `PATCH /api/cards/{id}`, `DELETE /api/cards/{id}`,
-    `POST /api/cards/{id}/run`, and any frontend "Pin" button/dashboard
-    grid still don't exist — later slices.
+  - `DELETE /api/cards/{id}`, `POST /api/cards/{id}/run`, and any
+    frontend "Pin" button/dashboard grid still don't exist — later
+    slices.
+- New this session: Docker Desktop's daemon does not auto-start with
+  this machine/session — if the next session's done-check fails with a
+  Postgres connection refusal on port 5433, start Docker Desktop and run
+  `docker compose up -d` before assuming a code regression.
 
 ## Next slice (the brief, written NOW while context is hot)
 
 Goal:
-Add `GET /api/dashboards/{id}` to `app/main.py`: returns the dashboard
-(`id`, `name`, `created_at`) plus its pinned cards ordered by
-`position`, where each card's persisted `sql_text` is re-validated
-(sqlglot) and re-executed (the read-only pool) fresh on every call and
-the card is returned with those fresh `rows` attached (`chart_spec_json`
-returned unchanged, as originally pinned); 404s if the dashboard id
-doesn't exist — proving PRD F6/§8's "fresh on view" requirement for
-real, against the live dev Postgres.
+Add `PATCH /api/cards/{id}` to `app/main.py`: partially updates an
+existing `DashboardCard`'s `title` and/or `position` — whichever of the
+two the request body supplies, leaving any field it omits unchanged —
+and returns the updated card; 404s if the card id doesn't exist. Per
+PRD.md §8's `PATCH /api/cards/{id} → rename/position`.
 
 Constraints:
-- Reuse the exact validate-then-execute sequence
-  `app/pipeline/answer.py`'s `_validate_and_execute(sql)` already
-  implements (owner-role sqlglot validation via
-  `app.catalog.sync.connect()`, then `execute_sql()`'s read-only pool)
-  per card — call it or mirror it directly; do NOT call `repair_sql()`
-  and do NOT make any LLM call. Fresh-on-view re-runs already-generated
-  SQL; it never regenerates it.
-- If any single card's SQL now fails validation or execution (e.g.
-  schema drift since it was pinned), the whole request must fail
-  clearly (502, matching `/api/ask`'s existing upstream-pipeline-failure
-  convention) rather than silently omitting that card or serving
-  stale/partial data. Per-card partial-failure rendering is explicitly
-  out of scope this slice.
+- Only `title` and `position` are mutable via this endpoint. The
+  request model must carry no field for `dashboard_id`, `question_text`,
+  `sql_text`, or `chart_spec_json` — those stay exactly as pinned;
+  renaming/repositioning never touches or re-validates `sql_text`.
+- Partial update: both `title` and `position` are optional on the
+  request; a field omitted (or explicitly `null`) from the request body
+  leaves that column unchanged on the row. Supplying neither is a
+  no-op 200 (returns the card unchanged) — do not treat an empty body
+  as a 422; that's needless scope for a same-shape rename-only or
+  position-only call to already need.
+- Response model: reuse the existing `DashboardCardDetail` (the same 8
+  persisted fields returned by `POST /api/dashboards/{id}/cards`) — no
+  `rows`, since PATCH never executes `sql_text`.
 - No new pool, no new dependency: `app/db/session.py`'s
-  `async_session_factory` for reading `Dashboard`/`DashboardCard` rows;
-  `app/pipeline/validate_sql.py` + `app/pipeline/execute_sql.py`'s two
-  existing pools (owner-role catalog connection, read-only asyncpg
-  pool) for the fresh row fetch — never merged, never a new one.
-- Cards must be ordered by their persisted `position` ascending in the
-  response.
+  `async_session_factory` only, exactly like every other dashboard-cards
+  route in this file.
+- Existing `POST /api/dashboards/{id}/cards` and
+  `GET /api/dashboards/{id}` are untouched.
 
 Inputs:
-- PRD.md §8 (`GET /api/dashboards/{id} → cards with fresh data`), F6.
-- `app/pipeline/answer.py`'s `_validate_and_execute(sql)` — the pattern
-  to reuse per card, without its enclosing repair-loop machinery.
-- `app/db/models.py`'s `Dashboard`/`DashboardCard` models.
-- `app/main.py`'s `get_conversation` (existence-check-then-404, then
-  building a parent-plus-children response) as the closest existing
-  shape for a "one row + its ordered children" GET endpoint.
+- PRD.md §8 (`PATCH /api/cards/{id} → rename/position`), §6 ("Card
+  actions: rename, delete, open originating chat").
+- `app/main.py`'s `create_dashboard_card` (existence-check-then-404,
+  build-then-flush-then-commit shape) as the closest existing pattern —
+  here checking `DashboardCard` existence directly (there is no parent
+  `dashboard_id` in the URL for this route), not `Dashboard`.
+- `app/db/models.py`'s `DashboardCard` for the exact column set.
 - `tests/test_api_dashboard_cards.py`'s `TestClient`/real-DB pattern and
-  its `_get_overview_dashboard_ids()`/`_delete_dashboard_card()` helpers
-  (from `tests/test_app_db.py`) to extend.
+  its `_create_dashboard_card()`/`_delete_dashboard_card()` helpers (from
+  `tests/test_app_db.py`), extended in place — same dashboard-cards
+  surface, not a new domain.
 
 Outputs:
-- `app/main.py` gains a `DashboardCardWithRows` (or similarly named)
-  response model carrying the persisted card fields plus fresh `rows`,
-  a `DashboardDetail` response model (`id`, `name`, `created_at`,
-  `cards: list[...]`), and the `GET /api/dashboards/{id}` route.
-- Test coverage (extend `tests/test_api_dashboard_cards.py` or add a
-  new file — decide during `/brief`): a happy-path test that pins ≥1
-  real card, calls the new GET, and asserts the returned `rows` match a
-  real independently-executed SELECT (proving "fresh," not stale/cached
-  data); an unknown-dashboard-id 404 test; and a test proving a card
-  whose `sql_text` now fails validation/execution causes the whole
-  request to fail with a clear 502, not a silently dropped card.
+- `app/main.py` gains a `PatchDashboardCardRequest` request model
+  (`title: str | None = None`, `position: int | None = None`) and the
+  `PATCH /api/cards/{card_id}` route, reusing `DashboardCardDetail` as
+  the response model.
+- Test coverage (extend `tests/test_api_dashboard_cards.py`): rename
+  only (position unchanged), reposition only (title unchanged), both
+  together, an empty-body no-op (both fields unchanged, still 200), and
+  an unknown card id → 404. Every test cleans up the card it creates;
+  none deletes the seeded Overview dashboard row.
 
 Done-check:
-`python -m unittest discover -s tests -p "test_api_dashboard_cards.py" -v`
-passing, pasted fresh (adjust the `-p` pattern if a new test file name
-is chosen during `/brief`).
+`.venv/Scripts/python -m unittest discover -s tests -p "test_api_dashboard_cards.py" -v`
+passing, pasted fresh.
 
 Out-of-scope:
-- `PATCH /api/cards/{id}` (rename/position) and `DELETE /api/cards/{id}`
-  — later slices.
-- `POST /api/cards/{id}/run` (re-execute exactly one card) — later
-  slice; this slice's GET already re-executes every card, so a
-  single-card variant is separate, smaller work.
-- Per-card partial failure / degraded rendering (a bad card fails the
-  whole request this slice; graceful per-card error surfacing is a
-  later slice's concern).
-- `POST /api/dashboards` (creating additional dashboards) — PRD F6 is
-  "one default dashboard" for v1; only the seeded Overview exists.
-- Any frontend dashboard page/grid/Pin button.
-- Auto-computed `position`/ordering changes.
+- `DELETE /api/cards/{id}` — separate, smaller slice.
+- `POST /api/cards/{id}/run` (re-execute exactly one card) — separate
+  slice.
+- Any validation, re-execution, or mutation of `sql_text`,
+  `question_text`, `chart_spec_json`, or `dashboard_id` via this route —
+  all remain immutable here.
+- Bulk/multi-card reposition (e.g. a single request reordering an
+  entire card list at once) — this slice is one card, one `PATCH`, per
+  the brief's Goal.
+- Any frontend card-actions UI (rename input, drag-to-reposition).
