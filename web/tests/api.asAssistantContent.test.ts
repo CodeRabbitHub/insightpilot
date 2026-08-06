@@ -109,3 +109,88 @@ describe('asAssistantContent - sql/explanation extraction', () => {
     expect(content).toBeNull()
   })
 })
+
+// Tests for the `followUps` extraction added to `asAssistantContent()` by
+// plans/briefs/2026-08-06-follow-up-chips.md.
+//
+// Written from that brief alone, before the extraction exists in
+// web/src/api.ts. The brief specifies: "`asAssistantContent()` extracts
+// [followUps] from `analysis.follow_ups` with an `Array.isArray` guard
+// (same looseness as the existing `rows` guard -- no per-element
+// validation), returning `null` for the whole object if it's not an
+// array (matching the existing all-or-nothing guard-clause style already
+// tested ... for `sql`/`explanation`)." Tests below target exactly that:
+// the guard is Array.isArray only, applied to the whole result the same
+// way the other fields' guards are, with no inspection of individual
+// entries' types.
+describe('asAssistantContent - followUps extraction', () => {
+  it('exposes followUps unchanged for a fully-shaped assistant message', () => {
+    const content = asAssistantContent(
+      realShapedMessage({
+        analysis: {
+          ...realShapedMessage().analysis,
+          follow_ups: ['What about last quarter?', 'Which category grew fastest?'],
+        },
+      }),
+    )
+    expect(content).not.toBeNull()
+    expect(content?.followUps).toEqual([
+      'What about last quarter?',
+      'Which category grew fastest?',
+    ])
+  })
+
+  it('treats an empty follow_ups array as valid (not null) and exposes it as an empty array', () => {
+    const content = asAssistantContent(
+      realShapedMessage({
+        analysis: { ...realShapedMessage().analysis, follow_ups: [] },
+      }),
+    )
+    expect(content).not.toBeNull()
+    expect(content?.followUps).toEqual([])
+  })
+
+  it('does not validate individual entries -- an array containing non-string elements still passes the guard (same looseness as the rows check)', () => {
+    const content = asAssistantContent(
+      realShapedMessage({
+        analysis: {
+          ...realShapedMessage().analysis,
+          follow_ups: ['a real follow-up', 42, null],
+        },
+      }),
+    )
+    expect(content).not.toBeNull()
+    expect(content?.followUps).toEqual(['a real follow-up', 42, null])
+  })
+
+  it('returns null for the whole object when follow_ups is present but not an array (a string)', () => {
+    const content = asAssistantContent(
+      realShapedMessage({
+        analysis: {
+          ...realShapedMessage().analysis,
+          follow_ups: 'What about last quarter?',
+        },
+      }),
+    )
+    expect(content).toBeNull()
+  })
+
+  it('returns null for the whole object when follow_ups is present but not an array (an object)', () => {
+    const content = asAssistantContent(
+      realShapedMessage({
+        analysis: {
+          ...realShapedMessage().analysis,
+          follow_ups: { text: 'What about last quarter?' },
+        },
+      }),
+    )
+    expect(content).toBeNull()
+  })
+
+  it('returns null for the whole object when follow_ups is missing entirely', () => {
+    const message = realShapedMessage()
+    const analysis = message.analysis as Record<string, unknown>
+    delete analysis.follow_ups
+    expect(asAssistantContent(message)).toBeNull()
+  })
+})

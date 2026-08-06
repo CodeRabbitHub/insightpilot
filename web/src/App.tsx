@@ -10,6 +10,7 @@ import {
   type MessageDetail,
 } from './api'
 import { ChartView } from './components/ChartView'
+import { FollowUpChips } from './components/FollowUpChips'
 import { SqlDetails } from './components/SqlDetails'
 
 function formatTimestamp(iso: string): string {
@@ -20,13 +21,20 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e)
 }
 
-function AssistantResult({ message }: { message: MessageDetail }) {
+function AssistantResult({
+  message,
+  onSelectFollowUp,
+}: {
+  message: MessageDetail
+  onSelectFollowUp: (text: string) => void
+}) {
   const content = asAssistantContent(message.content_json)
   if (!content) return null
   return (
     <>
       <ChartView chartSpec={content.chartSpec} rows={content.rows} />
       <SqlDetails sql={content.sql} explanation={content.explanation} />
+      <FollowUpChips followUps={content.followUps} onSelect={onSelectFollowUp} />
     </>
   )
 }
@@ -113,7 +121,9 @@ function ConversationDetailView({
             <pre className="overflow-x-auto whitespace-pre-wrap text-sm">
               {JSON.stringify(m.content_json, null, 2)}
             </pre>
-            {m.role === 'assistant' && <AssistantResult message={m} />}
+            {m.role === 'assistant' && (
+              <AssistantResult message={m} onSelectFollowUp={setQuestion} />
+            )}
           </li>
         ))}
       </ul>

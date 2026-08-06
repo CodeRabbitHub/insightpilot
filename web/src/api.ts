@@ -56,12 +56,13 @@ export interface AssistantContent {
   chartSpec: Record<string, unknown>
   sql: string
   explanation: string
+  followUps: string[]
 }
 
 // content_json holds {question} for user messages and {sql, rows, analysis}
 // for assistant ones, so MessageDetail can't type it narrower -- this is the
-// one runtime check that a given message actually has the shape ChartView
-// and SqlDetails need, before each does its own further resolution.
+// one runtime check that a given message has the shape any per-message
+// assistant component needs, before each does its own further resolution.
 export function asAssistantContent(
   contentJson: Record<string, unknown>,
 ): AssistantContent | null {
@@ -75,11 +76,14 @@ export function asAssistantContent(
   if (typeof chartSpec !== 'object' || chartSpec === null) return null
   const explanation = (analysis as Record<string, unknown>).explanation
   if (typeof explanation !== 'string') return null
+  const followUps = (analysis as Record<string, unknown>).follow_ups
+  if (!Array.isArray(followUps)) return null
   return {
     rows: rows as Record<string, unknown>[],
     chartSpec: chartSpec as Record<string, unknown>,
     sql,
     explanation,
+    followUps: followUps as string[],
   }
 }
 
