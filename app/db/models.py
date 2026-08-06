@@ -33,3 +33,28 @@ class Message(Base):
     role: Mapped[str] = mapped_column(Text, nullable=False)
     content_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Dashboard(Base):
+    __tablename__ = "dashboards"
+    __table_args__ = {"schema": "app"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class DashboardCard(Base):
+    __tablename__ = "dashboard_cards"
+    __table_args__ = {"schema": "app"}
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dashboard_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("app.dashboards.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    sql_text: Mapped[str] = mapped_column(Text, nullable=False)
+    chart_spec_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

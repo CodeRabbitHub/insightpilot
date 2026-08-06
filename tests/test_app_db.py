@@ -29,19 +29,34 @@ test asserts that cleanup deletion is actually effective.
 
 Will fail honestly (ImportError) until app/db/session.py and
 app/db/models.py exist.
+
+This file also covers the dashboard persistence foundation brief
+(plans/briefs/2026-08-06-dashboard-persistence.md): `Dashboard` (id,
+name, created_at) and `DashboardCard` (id, dashboard_id FK, title,
+question_text, sql_text, chart_spec_json, position, created_at) ORM
+models, plus the migration's seeded single "Overview" dashboard row.
+The seeded Overview row is looked up by name and never deleted by these
+tests -- only the `DashboardCard` rows these tests insert under it are
+cleaned up.
+
+Will fail honestly (ImportError/AttributeError) until `Dashboard` and
+`DashboardCard` exist on app/db/models.py and the migration that creates
+`app.dashboards`/`app.dashboard_cards` and seeds the Overview row has
+been run.
 """
 import os
 import unittest
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 
 from _pg_helpers import conn_params  # noqa: F401 -- loads .env / defaults
 
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, Dashboard, DashboardCard, Message
 from app.db.session import async_session_factory, engine
 
 _NONEXISTENT_CONVERSATION_ID = -1
+_NONEXISTENT_DASHBOARD_ID = -1
 
 
 async def _create_conversation_and_message(title, role, content_json):
@@ -68,6 +83,46 @@ async def _delete_conversation_and_message(conversation_id, message_id):
         if conversation is not None:
             await session.delete(conversation)
         await session.commit()
+
+
+async def _get_overview_dashboard_ids():
+    """Returns the ids of every `dashboards` row named "Overview".
+
+    Used both to fetch the seeded dashboard to attach test cards to, and
+    to assert the migration's seed produced exactly one such row -- this
+    helper deliberately does not assert on the count itself so callers
+    can make that assertion explicit.
+    """
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Dashboard).where(Dashboard.name == "Overview")
+        )
+        return [dashboard.id for dashboard in result.scalars().all()]
+
+
+async def _create_dashboard_card(
+    dashboard_id, title, question_text, sql_text, chart_spec_json, position
+):
+    async with async_session_factory() as session:
+        card = DashboardCard(
+            dashboard_id=dashboard_id,
+            title=title,
+            question_text=question_text,
+            sql_text=sql_text,
+            chart_spec_json=chart_spec_json,
+            position=position,
+        )
+        session.add(card)
+        await session.commit()
+        return card.id
+
+
+async def _delete_dashboard_card(card_id):
+    async with async_session_factory() as session:
+        card = await session.get(DashboardCard, card_id)
+        if card is not None:
+            await session.delete(card)
+            await session.commit()
 
 
 class AppDbModelShapeTests(unittest.TestCase):
@@ -215,6 +270,173 @@ class AppDbRoundTripTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(
             message,
             "expected the message row to be gone after the cleanup delete",
+        )
+
+
+class DashboardModelShapeTests(unittest.TestCase):
+    """Proves the ORM models match the dashboard-persistence brief's
+    Outputs exactly -- no extra or missing columns."""
+
+    def test_dashboard_model_has_exactly_the_briefs_columns(self):
+        columns = {c.name for c in inspect(Dashboard).columns}
+        self.assertEqual(
+            columns,
+            {"id", "name", "created_at"},
+            "Dashboard must have exactly id, name, created_at per the "
+            f"brief's Outputs, got: {columns!r}",
+        )
+
+    def test_dashboard_card_model_has_exactly_the_briefs_columns(self):
+        columns = {c.name for c in inspect(DashboardCard).columns}
+        self.assertEqual(
+            columns,
+            {
+                "id",
+                "dashboard_id",
+                "title",
+                "question_text",
+                "sql_text",
+                "chart_spec_json",
+                "position",
+                "created_at",
+            },
+            "DashboardCard must have exactly id, dashboard_id, title, "
+            "question_text, sql_text, chart_spec_json, position, "
+            f"created_at per the brief's Outputs, got: {columns!r}",
+        )
+
+
+class DashboardCardRoundTripTests(unittest.IsolatedAsyncioTestCase):
+    async def test_overview_dashboard_seed_exists_exactly_once(self):
+        overview_ids = await _get_overview_dashboard_ids()
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected the migration to have seeded exactly one "
+            "dashboards row named 'Overview' (PRD F6: 'One default "
+            f"dashboard'), found {len(overview_ids)}: {overview_ids!r}",
+        )
+
+    async def test_insert_then_read_back_dashboard_card_in_a_fresh_session_matches_values(
+        self,
+    ):
+        overview_ids = await _get_overview_dashboard_ids()
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded Overview dashboard to attach a "
+            "test card to",
+        )
+        dashboard_id = overview_ids[0]
+
+        title = "Late deliveries by month"
+        question_text = "how many orders were delivered late, by month?"
+        sql_text = "select date_trunc('month', order_delivered_customer_date) as month, count(*) from olist.orders where order_delivered_customer_date > order_estimated_delivery_date group by 1"
+        chart_spec_json = {
+            "type": "bar",
+            "encoding": {
+                "x": {"field": "month", "type": "temporal"},
+                "y": {"field": "count", "type": "quantitative"},
+            },
+            "options": {"stacked": False, "colors": ["#1f77b4", "#ff7f0e"]},
+        }
+        position = 0
+
+        card_id = await _create_dashboard_card(
+            dashboard_id, title, question_text, sql_text, chart_spec_json, position
+        )
+        try:
+            async with async_session_factory() as fresh_session:
+                card = await fresh_session.get(DashboardCard, card_id)
+
+            self.assertIsNotNone(
+                card,
+                "expected the committed dashboard card to be visible in "
+                "a brand-new session (a real commit, not same-session "
+                "visibility)",
+            )
+            self.assertEqual(card.dashboard_id, dashboard_id)
+            self.assertEqual(card.title, title)
+            self.assertEqual(card.question_text, question_text)
+            self.assertEqual(card.sql_text, sql_text)
+            self.assertEqual(
+                card.chart_spec_json,
+                chart_spec_json,
+                "expected the nested dict to round-trip through the "
+                "chart_spec_json JSONB column unchanged",
+            )
+            self.assertEqual(card.position, position)
+            self.assertIsNotNone(card.created_at)
+        finally:
+            await _delete_dashboard_card(card_id)
+
+    async def test_dashboard_card_with_nonexistent_dashboard_id_violates_fk_constraint(
+        self,
+    ):
+        async with async_session_factory() as session:
+            orphan_card = DashboardCard(
+                dashboard_id=_NONEXISTENT_DASHBOARD_ID,
+                title="orphan card",
+                question_text="irrelevant",
+                sql_text="select 1",
+                chart_spec_json={"type": "bar"},
+                position=0,
+            )
+            session.add(orphan_card)
+            with self.assertRaises(
+                IntegrityError,
+                msg=(
+                    "expected the dashboard_cards.dashboard_id -> "
+                    "dashboards.id foreign key to be enforced, but "
+                    "committing a card pointing at a nonexistent "
+                    "dashboard id succeeded"
+                ),
+            ):
+                await session.commit()
+            await session.rollback()
+
+    async def test_cleanup_deletes_dashboard_card_leaving_no_trace_for_repeat_runs(
+        self,
+    ):
+        overview_ids = await _get_overview_dashboard_ids()
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded Overview dashboard to attach a "
+            "test card to",
+        )
+        dashboard_id = overview_ids[0]
+
+        card_id = await _create_dashboard_card(
+            dashboard_id,
+            "cleanup check card",
+            "does cleanup actually delete dashboard card rows?",
+            "select 1",
+            {"type": "bar", "options": {"stacked": True}},
+            0,
+        )
+
+        await _delete_dashboard_card(card_id)
+
+        async with async_session_factory() as fresh_session:
+            card = await fresh_session.get(DashboardCard, card_id)
+
+        self.assertIsNone(
+            card,
+            "expected the dashboard card row to be gone after the "
+            "cleanup delete, so repeat test runs don't accumulate "
+            "garbage rows",
+        )
+
+        # The seeded Overview dashboard itself must survive this and
+        # every other test run -- it is never deleted by this suite.
+        overview_ids_after = await _get_overview_dashboard_ids()
+        self.assertIn(
+            dashboard_id,
+            overview_ids_after,
+            "expected the seeded Overview dashboard row to still exist "
+            "after this test -- it must never be deleted, only the "
+            "dashboard_cards this suite inserts under it",
         )
 
 
