@@ -12,7 +12,7 @@ from sqlalchemy import select
 from app.db.models import Conversation, Dashboard, DashboardCard, Message
 from app.db.session import async_session_factory
 from app.pipeline.analyze_answer import AnalyzeResponse
-from app.pipeline.answer import get_answer
+from app.pipeline.answer import _validate_and_execute, get_answer
 
 app = FastAPI()
 
@@ -83,6 +83,17 @@ class DashboardCardDetail(BaseModel):
     chart_spec_json: dict[str, Any]
     position: int
     created_at: datetime
+
+
+class DashboardCardWithRows(DashboardCardDetail):
+    rows: list[dict[str, Any]]
+
+
+class DashboardDetail(BaseModel):
+    id: int
+    name: str
+    created_at: datetime
+    cards: list[DashboardCardWithRows]
 
 
 async def _persist_exchange(question: str, response: AskResponse) -> None:
@@ -337,3 +348,53 @@ async def create_dashboard_card(
         )
         await session.commit()
     return result
+
+
+@app.get("/api/dashboards/{dashboard_id}", response_model=DashboardDetail)
+async def get_dashboard(dashboard_id: int) -> DashboardDetail:
+    """Fresh-on-view -- PRD F6/Sec.8. Re-validates and re-executes every
+    pinned card's sql_text on every request rather than serving a cached
+    value; the app-schema read (Dashboard/DashboardCard) is closed out
+    before any card's SQL is validated/executed, so the app pool never
+    overlaps with the two SQL pools _validate_and_execute() uses. Any one
+    card failing validation or execution (e.g. schema drift since it was
+    pinned) fails the whole request with 502, matching ask()'s
+    upstream-pipeline-failure convention, rather than silently dropping
+    that card or serving a partial/degraded card list."""
+    async with async_session_factory() as session:
+        dashboard = await session.get(Dashboard, dashboard_id)
+        if dashboard is None:
+            raise HTTPException(status_code=404, detail="dashboard not found")
+        result = await session.execute(
+            select(DashboardCard)
+            .where(DashboardCard.dashboard_id == dashboard_id)
+            .order_by(DashboardCard.position)
+        )
+        cards = result.scalars().all()
+
+    card_details = []
+    for card in cards:
+        try:
+            _, rows = await _validate_and_execute(card.sql_text)
+        except Exception as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        card_details.append(
+            DashboardCardWithRows(
+                id=card.id,
+                dashboard_id=card.dashboard_id,
+                title=card.title,
+                question_text=card.question_text,
+                sql_text=card.sql_text,
+                chart_spec_json=card.chart_spec_json,
+                position=card.position,
+                created_at=card.created_at,
+                rows=rows,
+            )
+        )
+
+    return DashboardDetail(
+        id=dashboard.id,
+        name=dashboard.name,
+        created_at=dashboard.created_at,
+        cards=card_details,
+    )

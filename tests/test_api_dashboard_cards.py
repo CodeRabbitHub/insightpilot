@@ -44,6 +44,57 @@ stop_verify hook running against the same live dev DB). It asserts the
 route 404s and that zero DashboardCard rows exist with that
 dashboard_id afterward -- the brief's "404 immediately (zero DB
 writes)" requirement.
+
+This file also covers the dashboard-fresh-on-view-get brief
+(plans/briefs/2026-08-06-dashboard-fresh-on-view-get.md): a real
+`GET /api/dashboards/{dashboard_id}` route that returns the dashboard's
+own fields (`id`, `name`, `created_at`) plus every pinned card ordered
+by `position` ascending, where each card carries its persisted fields
+plus a `rows` field obtained by re-validating and re-executing that
+card's stored `sql_text` fresh on every request -- never a cached or
+stored value (there is no `rows` column on `DashboardCard` to cache in
+the first place).
+
+These GET tests seed their fixture cards directly via
+`test_app_db._create_dashboard_card()` rather than through the POST
+route above, per the brief's own guidance -- these tests care about
+pre-existing rows on view, not the creation path.
+
+`DashboardDetailHappyPathTests` pins two real cards under the seeded
+Overview dashboard with their `position` values inserted out of numeric
+order (position=1 first, position=0 second) to catch an implementation
+that just returns insertion/id order instead of sorting by `position`;
+proves "fresh, not stale" by independently re-running one seeded card's
+exact `sql_text` through a fresh call to
+`app.pipeline.execute_sql.execute_sql()` and asserting the GET
+response's `rows` for that card match that independent execution
+exactly, rather than trusting the endpoint's own claim. Assertions about
+which cards/ids appear are scoped to the two ids this test itself
+created (never a bare "the response has exactly N cards" count), so a
+concurrently running instance of this suite (e.g. the stop_verify hook)
+can never make this test flaky -- mirroring `_cards_for_dashboard`'s own
+scoping rationale above.
+
+`DashboardDetailNoOwnCardsTests` GETs the Overview dashboard while
+creating no cards of its own, and asserts a 200 with a list-typed
+`cards` field -- exercising the zero-or-more-cards loop for real without
+asserting exact emptiness, since the shared dashboard may carry cards
+from a concurrently running instance of this suite.
+
+`DashboardDetailUnknownIdTests` 404s for the same
+`UNKNOWN_DASHBOARD_ID` sentinel used by `UnknownDashboardIdTests` above.
+
+`DashboardDetailBadCardSqlTests` pins one card whose `sql_text` is
+deliberately invalid against the real catalog (a table that does not
+exist), simulating schema drift since the card was pinned, and proves
+the *whole* GET request 502s -- never a 200 with that card silently
+dropped, never a partial/degraded card list -- per the brief's explicit
+Constraint that per-card partial-failure rendering is out of scope this
+slice.
+
+Every test that creates a DashboardCard row cleans it up via
+`test_app_db._delete_dashboard_card()` in tearDown, and none of these
+tests ever deletes the seeded Overview `dashboards` row itself.
 """
 import asyncio
 import unittest
@@ -75,6 +126,15 @@ except Exception as exc:  # noqa: BLE001 -- captured so setUp can report it
     if _IMPORT_ERROR is None:
         _IMPORT_ERROR = exc
 
+try:
+    from app.pipeline.execute_sql import execute_sql
+    from test_app_db import _create_dashboard_card
+except Exception as exc:  # noqa: BLE001 -- captured so setUp can report it
+    execute_sql = None
+    _create_dashboard_card = None
+    if _IMPORT_ERROR is None:
+        _IMPORT_ERROR = exc
+
 
 UNKNOWN_DASHBOARD_ID = 999_999_999
 
@@ -88,6 +148,10 @@ EXPECTED_RESPONSE_FIELDS = {
     "position",
     "created_at",
 }
+
+EXPECTED_CARD_WITH_ROWS_FIELDS = EXPECTED_RESPONSE_FIELDS | {"rows"}
+
+EXPECTED_DASHBOARD_DETAIL_FIELDS = {"id", "name", "created_at", "cards"}
 
 
 async def _cards_for_dashboard(dashboard_id):
@@ -297,6 +361,377 @@ class UnknownDashboardIdTests(unittest.TestCase):
             "expected zero DashboardCard rows for the unknown sentinel "
             f"dashboard_id={UNKNOWN_DASHBOARD_ID} -- the brief requires "
             f"a 404 with zero DB writes, got: {[c.id for c in cards]!r}",
+        )
+
+
+class DashboardDetailHappyPathTests(unittest.TestCase):
+    """GET /api/dashboards/{id} against the seeded Overview dashboard,
+    with two real DashboardCard rows pinned directly via
+    test_app_db._create_dashboard_card() with their `position` values
+    inserted out of numeric order (position=1 first, position=0
+    second), must return the dashboard's own fields plus both cards --
+    ordered by position ascending, never insertion order -- each
+    carrying fresh `rows` obtained by re-executing its persisted
+    `sql_text` on this very request, not a stored/cached value (there is
+    no `rows` column on DashboardCard to cache in the first place)."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"test cards under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        # Inserted out of numeric order on purpose: the position=1 card
+        # is created FIRST, the position=0 card SECOND. A correct
+        # implementation must still return the position=0 card first.
+        self.second_sql = "select 1 as n"
+        self.second_card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                "Second card (position 1)",
+                "irrelevant question text for this test",
+                self.second_sql,
+                {"type": "bar"},
+                1,
+            )
+        )
+        self.first_sql = "select count(*) from olist.orders"
+        self.first_card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                "First card (position 0)",
+                "how many orders are there in total?",
+                self.first_sql,
+                {"type": "number"},
+                0,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.get(f"/api/dashboards/{self.dashboard_id}")
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.first_card_id))
+        asyncio.run(_delete_dashboard_card(self.second_card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for GET /api/dashboards/{id}, got "
+            f"{self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_has_exactly_the_dashboard_level_fields(self):
+        body = self.response.json()
+        self.assertEqual(
+            set(body.keys()),
+            EXPECTED_DASHBOARD_DETAIL_FIELDS,
+            "expected exactly id, name, created_at, cards per the "
+            f"brief's DashboardDetail model, got: {body!r}",
+        )
+
+    def test_response_id_and_name_match_the_seeded_overview_dashboard(self):
+        body = self.response.json()
+        self.assertEqual(body["id"], self.dashboard_id)
+        self.assertEqual(body["name"], "Overview")
+
+    def test_response_has_a_created_at_timestamp(self):
+        body = self.response.json()
+        self.assertIsInstance(body["created_at"], str)
+        self.assertGreater(len(body["created_at"].strip()), 0)
+
+    def test_response_includes_both_cards_this_test_pinned(self):
+        # Scoped to just this test's own two card ids rather than an
+        # exact-count assertion over the whole cards list, so a
+        # concurrently running instance of this suite (e.g. the
+        # stop_verify hook) can never make this assertion flaky.
+        body = self.response.json()
+        card_ids = {c["id"] for c in body["cards"]}
+        self.assertTrue(
+            {self.first_card_id, self.second_card_id} <= card_ids,
+            "expected both cards this test pinned to appear in the "
+            f"response, got card ids: {card_ids!r}",
+        )
+
+    def test_cards_are_ordered_by_position_ascending_not_insertion_order(self):
+        body = self.response.json()
+        ids_in_response_order = [
+            c["id"]
+            for c in body["cards"]
+            if c["id"] in (self.first_card_id, self.second_card_id)
+        ]
+        self.assertEqual(
+            ids_in_response_order,
+            [self.first_card_id, self.second_card_id],
+            "expected the position=0 card (inserted SECOND) before the "
+            "position=1 card (inserted FIRST) -- ordering must follow "
+            f"`position`, not insertion/id order, got card ids in this "
+            f"response order: {ids_in_response_order!r}",
+        )
+
+    def test_every_card_in_the_response_has_exactly_the_persisted_fields_plus_rows(
+        self,
+    ):
+        body = self.response.json()
+        self.assertGreater(
+            len(body["cards"]), 0, "expected at least the two pinned test cards"
+        )
+        for card in body["cards"]:
+            self.assertEqual(
+                set(card.keys()),
+                EXPECTED_CARD_WITH_ROWS_FIELDS,
+                "expected each card to carry exactly the persisted "
+                "DashboardCard fields (id, dashboard_id, title, "
+                "question_text, sql_text, chart_spec_json, position, "
+                f"created_at) plus a fresh 'rows' field, got: {card!r}",
+            )
+
+    def test_each_card_echoes_its_persisted_fields_unchanged(self):
+        body = self.response.json()
+        cards_by_id = {c["id"]: c for c in body["cards"]}
+
+        first = cards_by_id[self.first_card_id]
+        self.assertEqual(first["dashboard_id"], self.dashboard_id)
+        self.assertEqual(first["title"], "First card (position 0)")
+        self.assertEqual(
+            first["question_text"], "how many orders are there in total?"
+        )
+        self.assertEqual(first["sql_text"], self.first_sql)
+        self.assertEqual(first["chart_spec_json"], {"type": "number"})
+        self.assertEqual(first["position"], 0)
+
+        second = cards_by_id[self.second_card_id]
+        self.assertEqual(second["dashboard_id"], self.dashboard_id)
+        self.assertEqual(second["title"], "Second card (position 1)")
+        self.assertEqual(
+            second["question_text"], "irrelevant question text for this test"
+        )
+        self.assertEqual(second["sql_text"], self.second_sql)
+        self.assertEqual(second["chart_spec_json"], {"type": "bar"})
+        self.assertEqual(second["position"], 1)
+
+    def test_rows_match_an_independent_real_execute_sql_call_on_the_same_sql_text(
+        self,
+    ):
+        # This is the "fresh on view" proof: there is no rows column on
+        # DashboardCard to have served a cached value from, so the only
+        # way the endpoint could produce this rows value is by actually
+        # re-running sql_text on this request. Confirmed here by
+        # independently re-running the exact same sql_text through the
+        # same real execution path and asserting equality.
+        body = self.response.json()
+        cards_by_id = {c["id"]: c for c in body["cards"]}
+
+        independent_rows = asyncio.run(execute_sql(self.first_sql))
+        self.assertEqual(
+            cards_by_id[self.first_card_id]["rows"],
+            independent_rows,
+            "expected the response's rows for this card to match an "
+            "independent, real app.pipeline.execute_sql.execute_sql() "
+            "call on the exact same sql_text, proving the endpoint "
+            "re-executed it fresh rather than returning a stale/cached "
+            "value",
+        )
+
+    def test_rows_field_is_a_nonempty_list_of_dicts(self):
+        body = self.response.json()
+        cards_by_id = {c["id"]: c for c in body["cards"]}
+        rows = cards_by_id[self.first_card_id]["rows"]
+        self.assertIsInstance(rows, list)
+        self.assertGreater(len(rows), 0, f"expected non-empty rows, got: {rows!r}")
+        for row in rows:
+            self.assertIsInstance(row, dict)
+
+    def test_overview_dashboard_survives_this_tests_cleanup(self):
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertIn(
+            self.dashboard_id,
+            overview_ids,
+            "expected the seeded Overview dashboard row to still exist "
+            "after this test's GET -- it must never be deleted by this "
+            "suite, only the dashboard_cards it creates",
+        )
+
+
+class DashboardDetailNoOwnCardsTests(unittest.TestCase):
+    """GET /api/dashboards/{id} must not assume the card list is
+    non-empty -- this creates no cards of its own and asserts the
+    response is still a well-formed 200 with a list-typed `cards` field
+    (the zero-cards code path: the per-card validate/execute loop must
+    run zero times cleanly, not error on an empty result set).
+
+    Cannot assert `cards == []` -- the Overview dashboard is shared with
+    every other test/process against this live dev Postgres (PRD F6:
+    "one default dashboard", and this brief's Out-of-scope forbids
+    creating another one to isolate against), so a concurrently running
+    instance of this suite may have its own cards pinned at the same
+    moment. Asserting the *type* of `cards` still exercises the
+    zero-or-more-cards loop for real, without an exact-count assertion
+    that would be flaky under concurrency."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row, found "
+            f"{len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        client = TestClient(app)
+        self.response = client.get(f"/api/dashboards/{self.dashboard_id}")
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for GET /api/dashboards/{id} with no cards of "
+            f"this test's own, got {self.response.status_code}: "
+            f"{self.response.text}",
+        )
+
+    def test_cards_field_is_a_list(self):
+        body = self.response.json()
+        self.assertIsInstance(
+            body["cards"],
+            list,
+            f"expected 'cards' to be a list even with none pinned by "
+            f"this test, got: {body['cards']!r}",
+        )
+
+
+class DashboardDetailUnknownIdTests(unittest.TestCase):
+    """GET /api/dashboards/{id} against a dashboard id that does not
+    exist must 404. Uses the same large fixed sentinel id
+    (999_999_999) as UnknownDashboardIdTests above, for the same
+    race-avoidance reason."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        client = TestClient(app)
+        self.response = client.get(f"/api/dashboards/{UNKNOWN_DASHBOARD_ID}")
+
+    def test_returns_404(self):
+        self.assertEqual(
+            self.response.status_code,
+            404,
+            "expected 404 for GET /api/dashboards/{id} with an unknown "
+            f"dashboard id, got {self.response.status_code}: "
+            f"{self.response.text}",
+        )
+
+    def test_404_response_body_has_a_detail_string(self):
+        body = self.response.json()
+        self.assertIn(
+            "detail",
+            body,
+            f"expected a 'detail' key in the 404 error body, got: {body!r}",
+        )
+        self.assertIsInstance(body["detail"], str)
+
+
+class DashboardDetailBadCardSqlTests(unittest.TestCase):
+    """One pinned card whose sql_text no longer validates/executes (here,
+    a reference to a table that does not exist in the real catalog,
+    simulating schema drift since the card was pinned) must fail the
+    WHOLE GET request with 502 -- never a 200 with that card silently
+    dropped, never a partial/degraded card list. Matches /api/ask's
+    existing upstream-pipeline-failure convention
+    (HTTPException(status_code=502, detail=str(exc))).
+
+    Known, accepted tradeoff: the brief's Out-of-scope forbids creating a
+    second dashboard (PRD F6: "one default dashboard"), so this test's
+    broken card is necessarily pinned onto the one real seeded Overview
+    dashboard for the brief lifetime of this test. Any other GET against
+    that same dashboard_id concurrently in flight (e.g. another instance
+    of this suite, or the stop_verify hook) would also observe a 502
+    during that narrow window -- correct per-request behavior, but a
+    real, if brief and low-probability, side effect on shared state.
+    Accepted here rather than avoided, since there is no in-scope way to
+    isolate this fixture from the one shared dashboard."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.bad_card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                "Card with SQL that no longer validates",
+                "irrelevant question text for this test",
+                "select * from nonexistent_table",
+                {"type": "bar"},
+                0,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.get(f"/api/dashboards/{self.dashboard_id}")
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.bad_card_id))
+
+    def test_returns_502_not_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            502,
+            "expected 502 when a pinned card's sql_text no longer "
+            f"validates or executes, got {self.response.status_code}: "
+            f"{self.response.text}",
+        )
+
+    def test_502_response_body_has_a_detail_string(self):
+        body = self.response.json()
+        self.assertIn(
+            "detail",
+            body,
+            f"expected a 'detail' key in the 502 error body, got: {body!r}",
+        )
+        self.assertIsInstance(body["detail"], str)
+
+    def test_502_response_body_has_no_cards_field(self):
+        # Per the brief's Constraint: a bad card must fail the WHOLE
+        # request -- no partial card list with that one card silently
+        # dropped, no degraded 200.
+        body = self.response.json()
+        self.assertNotIn(
+            "cards",
+            body,
+            "expected the 502 error body to carry no 'cards' field at "
+            f"all -- no partial/degraded card list, got: {body!r}",
+        )
+
+    def test_overview_dashboard_survives_this_tests_cleanup(self):
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertIn(
+            self.dashboard_id,
+            overview_ids,
+            "expected the seeded Overview dashboard row to still exist "
+            "after this test -- it must never be deleted by this suite, "
+            "only the dashboard_cards it creates",
         )
 
 

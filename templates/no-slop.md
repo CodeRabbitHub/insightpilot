@@ -91,6 +91,20 @@ Dead code is a lie about what the program does. Delete it.
 - [ ] Matches the surrounding file's idioms, structure, and naming — not your personal defaults
 - [ ] Uses the project's existing utilities instead of reinventing them
 - [ ] Same error-handling, logging, and import style as its neighbors
+- [ ] An existence-check-then-404 route (`session.get(Model, id)` →
+      `HTTPException(404, ...)` before building the real response) raises
+      that 404 while the `async with async_session_factory()` block is
+      still open, not after it closes — this is `app/main.py`'s dominant
+      shape (`get_conversation`, `create_dashboard_card`, `get_dashboard`).
+      The one exception, `post_conversation_message`, closes the session
+      first because its 404 check gates a subsequent LLM-streamed
+      response, not a same-block read/write — don't flag raise-inside as
+      a deviation from it (caught twice as a false deviation before this
+      line existed: 2026-08-06 pin-dashboard-card-endpoint's gate flagged
+      it against `post_conversation_message`'s shape as an accepted
+      stylistic deviation; 2026-08-06 dashboard-fresh-on-view-get's gate
+      flagged it again on `get_dashboard`, at which point it was clear
+      raise-inside was already the majority pattern, not a one-off)
 - [ ] An API/SSE response payload is built from a Pydantic model
       (`response_model=` or `jsonable_encoder(SomeModel(...))`), never a
       raw dict merge or hand-assembled dict serialized directly — a
