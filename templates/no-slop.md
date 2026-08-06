@@ -76,6 +76,15 @@ Dead code is a lie about what the program does. Delete it.
 - [ ] No comment that just restates the code (// loop over users)
 - [ ] Comments that remain explain why, not what — the non-obvious decision, the constraint, the gotcha
 - [ ] No stale comments describing code that changed
+- [ ] A comment justifying a shared/runtime-checked helper does not
+      enumerate its current callers by name if that list is expected to
+      grow — name the property being guaranteed instead, so the next new
+      caller doesn't make the comment stale on arrival (caught twice on
+      the same line: 2026-08-06 sql-explanation-viewer's gate fixed
+      `asAssistantContent()`'s doc comment from naming only `ChartView` to
+      naming `ChartView and SqlDetails`; 2026-08-06 follow-up-chips' gate
+      caught it stale again the very next slice and generalized it to "any
+      per-message assistant component")
 
 ## 7. Consistency with the codebase
 
