@@ -95,6 +95,56 @@ slice.
 Every test that creates a DashboardCard row cleans it up via
 `test_app_db._delete_dashboard_card()` in tearDown, and none of these
 tests ever deletes the seeded Overview `dashboards` row itself.
+
+This file also covers the patch-dashboard-card-endpoint brief
+(plans/briefs/2026-08-06-patch-dashboard-card-endpoint.md): a real
+`PATCH /api/cards/{card_id}` route that partially updates an existing
+`DashboardCard`'s `title` and/or `position` -- whichever the request
+body supplies, leaving any omitted-or-null field unchanged -- and
+returns it via the same `DashboardCardDetail` shape used by the POST
+route above (no `rows`, since PATCH never touches or re-executes
+`sql_text`). These tests seed their fixture card directly via
+`test_app_db._create_dashboard_card()`, exactly like the GET tests
+above, since this is a card-mutation test, not a creation-path test.
+
+`PatchDashboardCardRenameOnlyTests` PATCHes only `title` and asserts the
+response's `title` changed while `position` and every other persisted
+field stayed at its seeded value -- confirmed both in the response body
+and, separately, by re-fetching the row through a brand-new
+`async_session_factory` session, matching this file's established
+"verify via a fresh session, not just the echoed response" pattern.
+
+`PatchDashboardCardRepositionOnlyTests` is the mirror image: PATCHes
+only `position` and asserts `title` (and the other fields) are
+untouched, again confirmed via both the response and a fresh session.
+
+`PatchDashboardCardFalsyNewValuesTests` PATCHes `title: ""` and
+`position: 0` -- both falsy but present -- against a card seeded with
+non-falsy values, proving the route applies them (an `is not None`
+check) rather than silently skipping them (a plain-truthiness check
+would treat `""`/`0` the same as omitted).
+
+`PatchDashboardCardIgnoresDisallowedFieldsTests` PATCHes a body that
+also includes `dashboard_id`, `question_text`, `sql_text`, and
+`chart_spec_json` alongside a legitimate `title` change, and asserts
+all four disallowed fields stay exactly at their seeded values -- per
+the brief's Constraint that only `title`/`position` are mutable via
+this route.
+
+`PatchDashboardCardBothFieldsTests` PATCHes `title` and `position`
+together in one request and asserts both changed.
+
+`PatchDashboardCardEmptyBodyNoopTests` PATCHes an empty `{}` body and
+asserts a 200 (explicitly not a 422) with every field -- including
+`title` and `position` -- unchanged from the seeded values, per the
+brief's "supplying neither is a no-op 200" Constraint.
+
+`PatchDashboardCardUnknownIdTests` PATCHes the same large fixed sentinel
+id convention as `UnknownDashboardIdTests`/`DashboardDetailUnknownIdTests`
+above (here named `UNKNOWN_CARD_ID`) and asserts a 404 with a `detail`
+string in the body, matching this file's existing loose 404-detail
+convention (a `detail` key present and string-typed, not an exact-text
+assertion) used by `DashboardDetailUnknownIdTests` above.
 """
 import asyncio
 import unittest
@@ -137,6 +187,7 @@ except Exception as exc:  # noqa: BLE001 -- captured so setUp can report it
 
 
 UNKNOWN_DASHBOARD_ID = 999_999_999
+UNKNOWN_CARD_ID = 999_999_999
 
 EXPECTED_RESPONSE_FIELDS = {
     "id",
@@ -163,6 +214,11 @@ async def _cards_for_dashboard(dashboard_id):
             select(DashboardCard).where(DashboardCard.dashboard_id == dashboard_id)
         )
         return list(result.scalars().all())
+
+
+async def _fetch_card(card_id):
+    async with async_session_factory() as session:
+        return await session.get(DashboardCard, card_id)
 
 
 class DashboardCardHappyPathTests(unittest.TestCase):
@@ -570,7 +626,7 @@ class DashboardDetailNoOwnCardsTests(unittest.TestCase):
 
     Cannot assert `cards == []` -- the Overview dashboard is shared with
     every other test/process against this live dev Postgres (PRD F6:
-    "one default dashboard", and this brief's Out-of-scope forbids
+    "one default dashboard"), and this brief's Out-of-scope forbids
     creating another one to isolate against), so a concurrently running
     instance of this suite may have its own cards pinned at the same
     moment. Asserting the *type* of `cards` still exercises the
@@ -733,6 +789,549 @@ class DashboardDetailBadCardSqlTests(unittest.TestCase):
             "after this test -- it must never be deleted by this suite, "
             "only the dashboard_cards it creates",
         )
+
+
+class PatchDashboardCardRenameOnlyTests(unittest.TestCase):
+    """PATCH /api/cards/{id} with only `title` in the body must update
+    just that column -- `position` and every other persisted field must
+    stay exactly at its seeded value. Confirmed both via the response
+    body and via a fresh async_session_factory session query, matching
+    this file's established "verify via a fresh session, not just the
+    echoed response" pattern (see DashboardCardHappyPathTests above)."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_title = "Original title before PATCH"
+        self.seeded_question_text = "how many orders are there in total?"
+        self.seeded_sql_text = "select count(*) from olist.orders"
+        self.seeded_chart_spec_json = {"type": "number"}
+        self.seeded_position = 3
+
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.seeded_title,
+                self.seeded_question_text,
+                self.seeded_sql_text,
+                self.seeded_chart_spec_json,
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.new_title = "Renamed title after PATCH"
+        self.response = client.patch(
+            f"/api/cards/{self.card_id}", json={"title": self.new_title}
+        )
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for a rename-only PATCH /api/cards/{id}, got "
+            f"{self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_has_exactly_the_briefs_eight_fields(self):
+        body = self.response.json()
+        self.assertEqual(
+            set(body.keys()),
+            EXPECTED_RESPONSE_FIELDS,
+            "expected the PATCH response to reuse DashboardCardDetail's "
+            "exact 8 fields (no 'rows', since PATCH never touches "
+            f"sql_text), got: {body!r}",
+        )
+
+    def test_response_title_is_updated(self):
+        body = self.response.json()
+        self.assertEqual(
+            body["title"],
+            self.new_title,
+            f"expected the response title to be the new value, got: {body!r}",
+        )
+
+    def test_response_position_and_other_fields_are_unchanged(self):
+        body = self.response.json()
+        self.assertEqual(
+            body["position"],
+            self.seeded_position,
+            "expected position to be untouched by a title-only PATCH, "
+            f"got: {body!r}",
+        )
+        self.assertEqual(body["dashboard_id"], self.dashboard_id)
+        self.assertEqual(body["question_text"], self.seeded_question_text)
+        self.assertEqual(body["sql_text"], self.seeded_sql_text)
+        self.assertEqual(body["chart_spec_json"], self.seeded_chart_spec_json)
+
+    def test_row_really_updated_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNotNone(
+            card,
+            "expected the patched card to still exist in a brand-new "
+            "session",
+        )
+        self.assertEqual(
+            card.title,
+            self.new_title,
+            "expected the persisted row's title column to reflect the "
+            "PATCH, not just the echoed response",
+        )
+        self.assertEqual(card.position, self.seeded_position)
+        self.assertEqual(card.dashboard_id, self.dashboard_id)
+        self.assertEqual(card.question_text, self.seeded_question_text)
+        self.assertEqual(card.sql_text, self.seeded_sql_text)
+        self.assertEqual(card.chart_spec_json, self.seeded_chart_spec_json)
+
+
+class PatchDashboardCardRepositionOnlyTests(unittest.TestCase):
+    """PATCH /api/cards/{id} with only `position` in the body must
+    update just that column -- `title` and every other persisted field
+    must stay exactly at its seeded value. Confirmed both via the
+    response body and via a fresh session, mirroring
+    PatchDashboardCardRenameOnlyTests above."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_title = "Title that must survive a reposition-only PATCH"
+        self.seeded_question_text = "irrelevant question text for this test"
+        self.seeded_sql_text = "select 1 as n"
+        self.seeded_chart_spec_json = {"type": "bar"}
+        self.seeded_position = 0
+
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.seeded_title,
+                self.seeded_question_text,
+                self.seeded_sql_text,
+                self.seeded_chart_spec_json,
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.new_position = 7
+        self.response = client.patch(
+            f"/api/cards/{self.card_id}", json={"position": self.new_position}
+        )
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for a reposition-only PATCH /api/cards/{id}, "
+            f"got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_position_is_updated(self):
+        body = self.response.json()
+        self.assertEqual(
+            body["position"],
+            self.new_position,
+            f"expected the response position to be the new value, got: {body!r}",
+        )
+
+    def test_response_title_and_other_fields_are_unchanged(self):
+        body = self.response.json()
+        self.assertEqual(
+            body["title"],
+            self.seeded_title,
+            "expected title to be untouched by a position-only PATCH, "
+            f"got: {body!r}",
+        )
+        self.assertEqual(body["dashboard_id"], self.dashboard_id)
+        self.assertEqual(body["question_text"], self.seeded_question_text)
+        self.assertEqual(body["sql_text"], self.seeded_sql_text)
+        self.assertEqual(body["chart_spec_json"], self.seeded_chart_spec_json)
+
+    def test_row_really_updated_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNotNone(card)
+        self.assertEqual(
+            card.position,
+            self.new_position,
+            "expected the persisted row's position column to reflect "
+            "the PATCH, not just the echoed response",
+        )
+        self.assertEqual(card.title, self.seeded_title)
+        self.assertEqual(card.dashboard_id, self.dashboard_id)
+        self.assertEqual(card.question_text, self.seeded_question_text)
+        self.assertEqual(card.sql_text, self.seeded_sql_text)
+        self.assertEqual(card.chart_spec_json, self.seeded_chart_spec_json)
+
+
+class PatchDashboardCardFalsyNewValuesTests(unittest.TestCase):
+    """PATCH /api/cards/{id} with new values that are falsy but present
+    -- `position: 0` and `title: ""` -- must still apply them, proving
+    the route checks `is not None` rather than plain truthiness. Seeds
+    a card whose title/position are both non-falsy so a truthiness-based
+    implementation (which would silently skip these) is distinguishable
+    from a None-check-based one (which applies them)."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_title = "Non-empty title before a falsy-value PATCH"
+        self.seeded_position = 4
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.seeded_title,
+                "irrelevant question text for this test",
+                "select 1 as n",
+                {"type": "bar"},
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.patch(
+            f"/api/cards/{self.card_id}", json={"title": "", "position": 0}
+        )
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for a falsy-new-values PATCH /api/cards/{id}, "
+            f"got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_title_and_position_are_applied_not_skipped(self):
+        body = self.response.json()
+        self.assertEqual(
+            body["title"],
+            "",
+            "expected an empty-string title to be applied, not skipped "
+            f"as falsy, got: {body!r}",
+        )
+        self.assertEqual(
+            body["position"],
+            0,
+            "expected a zero position to be applied, not skipped as "
+            f"falsy, got: {body!r}",
+        )
+
+    def test_row_really_updated_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNotNone(card)
+        self.assertEqual(
+            card.title,
+            "",
+            "expected the persisted row's title to be the applied empty "
+            "string, not the seeded non-empty value",
+        )
+        self.assertEqual(
+            card.position,
+            0,
+            "expected the persisted row's position to be the applied "
+            "zero, not the seeded non-zero value",
+        )
+
+
+class PatchDashboardCardIgnoresDisallowedFieldsTests(unittest.TestCase):
+    """PATCH /api/cards/{id} with `sql_text`, `dashboard_id`,
+    `chart_spec_json`, and `question_text` all present in the body
+    (alongside a legitimate `title` change) must leave every one of
+    those four columns exactly at its seeded value -- per the brief's
+    Constraint that only `title`/`position` are mutable via this route
+    and renaming/repositioning never touches or re-validates `sql_text`.
+    `PatchDashboardCardRequest` simply has no fields for them, so
+    Pydantic silently drops these extra keys, but this test proves that
+    behavior at the HTTP layer rather than leaving it as a structural
+    assumption -- confirmed both via the response and a fresh session."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_question_text = "how many orders are there in total?"
+        self.seeded_sql_text = "select count(*) from olist.orders"
+        self.seeded_chart_spec_json = {"type": "number"}
+        self.seeded_position = 1
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                "Original title before a disallowed-fields PATCH",
+                self.seeded_question_text,
+                self.seeded_sql_text,
+                self.seeded_chart_spec_json,
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.new_title = "Renamed, disallowed fields ignored"
+        self.response = client.patch(
+            f"/api/cards/{self.card_id}",
+            json={
+                "title": self.new_title,
+                "dashboard_id": self.dashboard_id + 1,
+                "question_text": "an entirely different question",
+                "sql_text": "select * from olist.nonexistent_table",
+                "chart_spec_json": {"type": "pie"},
+            },
+        )
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for a PATCH whose body includes disallowed "
+            f"extra fields alongside a legitimate title, got "
+            f"{self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_title_updated_but_disallowed_fields_unchanged(self):
+        body = self.response.json()
+        self.assertEqual(body["title"], self.new_title)
+        self.assertEqual(
+            body["dashboard_id"],
+            self.dashboard_id,
+            "dashboard_id must never change via this route, got: "
+            f"{body!r}",
+        )
+        self.assertEqual(body["question_text"], self.seeded_question_text)
+        self.assertEqual(body["sql_text"], self.seeded_sql_text)
+        self.assertEqual(body["chart_spec_json"], self.seeded_chart_spec_json)
+
+    def test_row_disallowed_fields_unchanged_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNotNone(card)
+        self.assertEqual(card.title, self.new_title)
+        self.assertEqual(card.dashboard_id, self.dashboard_id)
+        self.assertEqual(card.question_text, self.seeded_question_text)
+        self.assertEqual(card.sql_text, self.seeded_sql_text)
+        self.assertEqual(card.chart_spec_json, self.seeded_chart_spec_json)
+
+
+class PatchDashboardCardBothFieldsTests(unittest.TestCase):
+    """PATCH /api/cards/{id} with both `title` and `position` supplied
+    together in one request must update both columns."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_title = "Original title before a combined PATCH"
+        self.seeded_position = 2
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.seeded_title,
+                "irrelevant question text for this test",
+                "select 1 as n",
+                {"type": "bar"},
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.new_title = "Renamed by a combined PATCH"
+        self.new_position = 9
+        self.response = client.patch(
+            f"/api/cards/{self.card_id}",
+            json={"title": self.new_title, "position": self.new_position},
+        )
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for a combined title+position PATCH "
+            f"/api/cards/{{id}}, got {self.response.status_code}: "
+            f"{self.response.text}",
+        )
+
+    def test_response_title_and_position_both_updated(self):
+        body = self.response.json()
+        self.assertEqual(body["title"], self.new_title)
+        self.assertEqual(body["position"], self.new_position)
+
+    def test_row_really_updated_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNotNone(card)
+        self.assertEqual(card.title, self.new_title)
+        self.assertEqual(card.position, self.new_position)
+
+
+class PatchDashboardCardEmptyBodyNoopTests(unittest.TestCase):
+    """PATCH /api/cards/{id} with an empty `{}` body must be a 200 no-op
+    -- explicitly not a 422 -- with every field, including `title` and
+    `position`, unchanged from the seeded values."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_title = "Title that must survive an empty-body PATCH"
+        self.seeded_question_text = "irrelevant question text for this test"
+        self.seeded_sql_text = "select 1 as n"
+        self.seeded_chart_spec_json = {"type": "bar"}
+        self.seeded_position = 5
+
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.seeded_title,
+                self.seeded_question_text,
+                self.seeded_sql_text,
+                self.seeded_chart_spec_json,
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.patch(f"/api/cards/{self.card_id}", json={})
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200_not_422(self):
+        self.assertNotEqual(
+            self.response.status_code,
+            422,
+            "an empty PATCH body must not be treated as a validation "
+            f"error per the brief's Constraints, got: {self.response.text}",
+        )
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for an empty-body no-op PATCH /api/cards/{id}, "
+            f"got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_every_field_unchanged_from_seeded_values(self):
+        body = self.response.json()
+        self.assertEqual(body["id"], self.card_id)
+        self.assertEqual(body["dashboard_id"], self.dashboard_id)
+        self.assertEqual(body["title"], self.seeded_title)
+        self.assertEqual(body["question_text"], self.seeded_question_text)
+        self.assertEqual(body["sql_text"], self.seeded_sql_text)
+        self.assertEqual(body["chart_spec_json"], self.seeded_chart_spec_json)
+        self.assertEqual(body["position"], self.seeded_position)
+
+    def test_row_unchanged_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNotNone(card)
+        self.assertEqual(card.title, self.seeded_title)
+        self.assertEqual(card.position, self.seeded_position)
+        self.assertEqual(card.dashboard_id, self.dashboard_id)
+        self.assertEqual(card.question_text, self.seeded_question_text)
+        self.assertEqual(card.sql_text, self.seeded_sql_text)
+        self.assertEqual(card.chart_spec_json, self.seeded_chart_spec_json)
+
+
+class PatchDashboardCardUnknownIdTests(unittest.TestCase):
+    """PATCH /api/cards/{id} against a card id that does not exist must
+    404. Uses the same large fixed sentinel convention as
+    UnknownDashboardIdTests/DashboardDetailUnknownIdTests above (here
+    UNKNOWN_CARD_ID = 999_999_999), to avoid a race against cards
+    concurrently created by another instance of this suite (e.g. the
+    stop_verify hook running against the same live dev DB)."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        client = TestClient(app)
+        self.response = client.patch(
+            f"/api/cards/{UNKNOWN_CARD_ID}", json={"title": "should never apply"}
+        )
+
+    def test_returns_404(self):
+        self.assertEqual(
+            self.response.status_code,
+            404,
+            "expected 404 for PATCH /api/cards/{id} with an unknown "
+            f"card id, got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_404_response_body_has_a_detail_string(self):
+        # Matches this file's existing loose 404-detail convention (see
+        # DashboardDetailUnknownIdTests above): a 'detail' key present
+        # and string-typed, not an exact-text assertion.
+        body = self.response.json()
+        self.assertIn(
+            "detail",
+            body,
+            f"expected a 'detail' key in the 404 error body, got: {body!r}",
+        )
+        self.assertIsInstance(body["detail"], str)
 
 
 if __name__ == "__main__":

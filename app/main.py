@@ -96,6 +96,11 @@ class DashboardDetail(BaseModel):
     cards: list[DashboardCardWithRows]
 
 
+class PatchDashboardCardRequest(BaseModel):
+    title: str | None = None
+    position: int | None = None
+
+
 async def _persist_exchange(question: str, response: AskResponse) -> None:
     """Persist one Conversation plus its user/assistant Message pair
     through app/db's pool -- called only after get_answer() has already
@@ -398,3 +403,36 @@ async def get_dashboard(dashboard_id: int) -> DashboardDetail:
         created_at=dashboard.created_at,
         cards=card_details,
     )
+
+
+@app.patch("/api/cards/{card_id}", response_model=DashboardCardDetail)
+async def patch_dashboard_card(
+    card_id: int, request: PatchDashboardCardRequest
+) -> DashboardCardDetail:
+    """Renames and/or repositions a pinned card -- PRD Sec.8's
+    `PATCH /api/cards/{id} -> rename/position`. Only title/position are
+    mutable here; a field omitted (or null) in the request leaves that
+    column unchanged, so an empty body is a no-op 200, not a 422.
+    sql_text/question_text/chart_spec_json/dashboard_id are never
+    touched or re-validated by this route."""
+    async with async_session_factory() as session:
+        card = await session.get(DashboardCard, card_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="card not found")
+        if request.title is not None:
+            card.title = request.title
+        if request.position is not None:
+            card.position = request.position
+        await session.flush()
+        result = DashboardCardDetail(
+            id=card.id,
+            dashboard_id=card.dashboard_id,
+            title=card.title,
+            question_text=card.question_text,
+            sql_text=card.sql_text,
+            chart_spec_json=card.chart_spec_json,
+            position=card.position,
+            created_at=card.created_at,
+        )
+        await session.commit()
+    return result
