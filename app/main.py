@@ -9,7 +9,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import select
 
-from app.db.models import Conversation, Message
+from app.db.models import Conversation, Dashboard, DashboardCard, Message
 from app.db.session import async_session_factory
 from app.pipeline.analyze_answer import AnalyzeResponse
 from app.pipeline.answer import get_answer
@@ -64,6 +64,25 @@ class ConversationDetail(BaseModel):
     title: str | None
     created_at: datetime
     messages: list[MessageDetail]
+
+
+class CreateDashboardCardRequest(BaseModel):
+    title: str
+    question_text: str
+    sql_text: str
+    chart_spec_json: dict[str, Any]
+    position: int
+
+
+class DashboardCardDetail(BaseModel):
+    id: int
+    dashboard_id: int
+    title: str
+    question_text: str
+    sql_text: str
+    chart_spec_json: dict[str, Any]
+    position: int
+    created_at: datetime
 
 
 async def _persist_exchange(question: str, response: AskResponse) -> None:
@@ -279,3 +298,42 @@ async def get_conversation(conversation_id: int) -> ConversationDetail:
             for m in messages
         ],
     )
+
+
+@app.post(
+    "/api/dashboards/{dashboard_id}/cards", response_model=DashboardCardDetail
+)
+async def create_dashboard_card(
+    dashboard_id: int, request: CreateDashboardCardRequest
+) -> DashboardCardDetail:
+    """Pins one card under an existing dashboard -- 404s with zero writes
+    if dashboard_id doesn't exist, mirroring post_conversation_message's
+    existence-check-then-404 pattern. sql_text/chart_spec_json are stored
+    opaquely: no sqlglot validation or execution happens here, only at
+    fresh-on-view (a later slice)."""
+    async with async_session_factory() as session:
+        dashboard = await session.get(Dashboard, dashboard_id)
+        if dashboard is None:
+            raise HTTPException(status_code=404, detail="dashboard not found")
+        card = DashboardCard(
+            dashboard_id=dashboard_id,
+            title=request.title,
+            question_text=request.question_text,
+            sql_text=request.sql_text,
+            chart_spec_json=request.chart_spec_json,
+            position=request.position,
+        )
+        session.add(card)
+        await session.flush()
+        result = DashboardCardDetail(
+            id=card.id,
+            dashboard_id=card.dashboard_id,
+            title=card.title,
+            question_text=card.question_text,
+            sql_text=card.sql_text,
+            chart_spec_json=card.chart_spec_json,
+            position=card.position,
+            created_at=card.created_at,
+        )
+        await session.commit()
+    return result
