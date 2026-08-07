@@ -40,7 +40,7 @@
 // that card from the rendered list (siblings untouched), with no extra
 // `fetchDashboard` refetch; clicking it and having `deleteCard` reject
 // leaves the card in place and surfaces the error via a dedicated
-// `deleteError` state (kept separate from the initial-fetch `error` state,
+// `actionError` state (kept separate from the initial-fetch `error` state,
 // since that state's existing `if (error) return <p>...</p>` guard would
 // otherwise blank the whole card list instead of leaving cards in place).
 // `../src/api` is still mocked at the module boundary, so `deleteCard` is
@@ -64,10 +64,26 @@
 // ChartView's real rendering behavior (so the existing bar/non-bar canvas
 // assertions above are unaffected), it merely also records each call's
 // props.
+//
+// Extended again per plans/briefs/2026-08-07-dashboard-card-rename-button.md
+// with tests for a "Rename" button per card, backed by `window.prompt`
+// (native browser API, per the brief's Constraints -- no new dependency,
+// no custom inline-edit input/modal). Unlike re-run, a rename *does*
+// change the card's title text, but the brief is explicit that the
+// success response (`DashboardCardDetail`) has no `rows` field, so the
+// component must merge only `title` from the response into the existing
+// card object rather than swapping the whole card in -- naively swapping
+// would silently wipe `rows`/`chart_spec_json` and blank the chart. The
+// same `ChartView` call-through spy used for the re-run tests is reused
+// here to prove `rows`/`chart_spec_json` are untouched by a rename, since
+// the title text changing on its own doesn't prove that. `renameCard` is
+// mocked alongside the other three api functions below; `window.prompt`
+// is stubbed per test via the `mockPrompt` helper and restored in the
+// shared `afterEach`.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { deleteCard, fetchDashboard, runCard } from '../src/api'
+import { deleteCard, fetchDashboard, renameCard, runCard } from '../src/api'
 import { DashboardView } from '../src/components/DashboardView'
 import { ChartView } from '../src/components/ChartView'
 
@@ -75,6 +91,7 @@ vi.mock('../src/api', () => ({
   fetchDashboard: vi.fn(),
   deleteCard: vi.fn(),
   runCard: vi.fn(),
+  renameCard: vi.fn(),
 }))
 
 vi.mock('../src/components/ChartView', async () => {
@@ -94,7 +111,13 @@ vi.mock('../src/components/ChartView', async () => {
 const mockedFetchDashboard = fetchDashboard as unknown as ReturnType<typeof vi.fn>
 const mockedDeleteCard = deleteCard as unknown as ReturnType<typeof vi.fn>
 const mockedRunCard = runCard as unknown as ReturnType<typeof vi.fn>
+const mockedRenameCard = renameCard as unknown as ReturnType<typeof vi.fn>
 const mockedChartView = ChartView as unknown as ReturnType<typeof vi.fn>
+
+// Preserved so `window.prompt` (stubbed per rename test via `mockPrompt`)
+// can be restored afterward, rather than leaking a stub into unrelated
+// tests/files.
+const originalWindowPrompt = window.prompt
 
 // Real card shapes per the brief's Inputs section (DashboardCardWithRows):
 // id, dashboard_id, title, question_text, sql_text, chart_spec_json,
@@ -143,6 +166,23 @@ const NON_BAR_CARD = {
   rows: [{ month: '2026-01', revenue: 1000 }],
 }
 
+// The real PATCH /api/cards/{id} response shape per the brief's Inputs
+// section: a `DashboardCardDetail` -- same id as BAR_CARD, new title,
+// but deliberately NO `rows` field (the route never touches rows). Used
+// to prove that DashboardView merges only `title` from this response
+// rather than swapping the whole card object in, which would otherwise
+// wipe BAR_CARD's rows/chart_spec_json.
+const RENAMED_BAR_CARD_DETAIL = {
+  id: BAR_CARD.id,
+  dashboard_id: BAR_CARD.dashboard_id,
+  title: 'Orders by category (renamed)',
+  question_text: BAR_CARD.question_text,
+  sql_text: BAR_CARD.sql_text,
+  chart_spec_json: BAR_CARD.chart_spec_json,
+  position: BAR_CARD.position,
+  created_at: BAR_CARD.created_at,
+}
+
 function dashboardWithCards(cards: unknown[]) {
   return {
     id: 1,
@@ -159,6 +199,7 @@ beforeEach(() => {
   mockedFetchDashboard.mockReset()
   mockedDeleteCard.mockReset()
   mockedRunCard.mockReset()
+  mockedRenameCard.mockReset()
   // `.mockClear()`, not `.mockReset()` -- resetting would also wipe the
   // call-through implementation set up in the `vi.mock` factory above,
   // which would break real chart rendering for every test.
@@ -173,6 +214,7 @@ afterEach(async () => {
     root.unmount()
   })
   container.remove()
+  window.prompt = originalWindowPrompt
 })
 
 function headingTexts(): string[] {
@@ -222,11 +264,45 @@ async function clickRerun(title: string) {
   })
 }
 
+function renameButtonIn(li: HTMLElement): HTMLElement {
+  const button = Array.from(li.querySelectorAll('button')).find((b) =>
+    /rename/i.test(b.textContent ?? ''),
+  )
+  if (!button) throw new Error('no Rename button found in <li>')
+  return button as HTMLElement
+}
+
+async function clickRename(title: string) {
+  const button = renameButtonIn(liForTitle(title))
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  })
+}
+
+// Stubs `window.prompt` to return a fixed value for the duration of a
+// test (restored in the shared `afterEach` above), and returns the stub
+// so a test can assert on how it was called (e.g. the default value
+// passed as its second argument).
+function mockPrompt(value: string | null) {
+  const promptFn = vi.fn().mockReturnValue(value)
+  window.prompt = promptFn
+  return promptFn
+}
+
 // Extracts the `rows` prop from each recorded ChartView call, for
 // asserting on which card's data a given render pass actually used.
 function chartRowsSeen(): Record<string, unknown>[][] {
   return mockedChartView.mock.calls.map(
     ([props]) => (props as { rows: Record<string, unknown>[] }).rows,
+  )
+}
+
+// Extracts the `chartSpec` prop from each recorded ChartView call, for
+// asserting that a card's chart_spec_json survives untouched across
+// actions (e.g. rename) that only intend to change its title.
+function chartSpecsSeen(): Record<string, unknown>[] {
+  return mockedChartView.mock.calls.map(
+    ([props]) => (props as { chartSpec: Record<string, unknown> }).chartSpec,
   )
 }
 
@@ -620,5 +696,240 @@ describe('DashboardView - failed re-run', () => {
     expect(headingTexts()).toHaveLength(2)
     expect(headingTexts()).toContain('Revenue over time')
     expect(chartRowsSeen()).toContainEqual(NON_BAR_CARD.rows)
+  })
+})
+
+// Tests below are from plans/briefs/2026-08-07-dashboard-card-rename-button.md.
+describe('DashboardView - rename button presence', () => {
+  it("renders a Rename button inside each card's <li>", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    expect(() => renameButtonIn(liForTitle('Orders by category'))).not.toThrow()
+    expect(() => renameButtonIn(liForTitle('Revenue over time'))).not.toThrow()
+  })
+
+  it('renders exactly one Rename button per card -- not a shared/global one', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    const allRenameButtons = Array.from(container.querySelectorAll('button')).filter((b) =>
+      /rename/i.test(b.textContent ?? ''),
+    )
+    expect(allRenameButtons).toHaveLength(2)
+  })
+})
+
+describe('DashboardView - rename prompt interaction', () => {
+  it("calls window.prompt with 'New title' and the card's current title as the default value", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    const promptFn = mockPrompt(null)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(promptFn).toHaveBeenCalledWith('New title', BAR_CARD.title)
+  })
+
+  it('sends no renameCard request when the prompt is cancelled (returns null)', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt(null)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(mockedRenameCard).not.toHaveBeenCalled()
+  })
+
+  it('leaves the title unchanged when the prompt is cancelled', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt(null)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(headingTexts()).toContain('Orders by category')
+  })
+
+  it('sends no renameCard request when the prompt result is an empty string', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('')
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(mockedRenameCard).not.toHaveBeenCalled()
+  })
+
+  it('sends no renameCard request when the prompt result is whitespace-only', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('   ')
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(mockedRenameCard).not.toHaveBeenCalled()
+  })
+
+  it('does not trigger an extra fetchDashboard call when the prompt is cancelled or empty', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt(null)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedFetchDashboard.mockClear()
+    await clickRename('Orders by category')
+    expect(mockedFetchDashboard).not.toHaveBeenCalled()
+  })
+})
+
+describe('DashboardView - successful rename', () => {
+  it('calls renameCard with the clicked card\'s own id and the trimmed prompt result', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('  Orders by category (renamed)  ')
+    mockedRenameCard.mockResolvedValue(RENAMED_BAR_CARD_DETAIL)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(mockedRenameCard).toHaveBeenCalledWith(BAR_CARD.id, 'Orders by category (renamed)')
+  })
+
+  it("updates only the renamed card's title in the heading text, leaving the sibling's title untouched", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockResolvedValue(RENAMED_BAR_CARD_DETAIL)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+
+    const texts = headingTexts()
+    expect(texts).toContain('Orders by category (renamed)')
+    expect(texts).not.toContain('Orders by category')
+    expect(texts).toContain('Revenue over time')
+  })
+
+  it("preserves the renamed card's own rows/chart_spec_json -- the DashboardCardDetail response has no rows field, so a naive whole-object swap would blank the chart", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockResolvedValue(RENAMED_BAR_CARD_DETAIL)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+    await clickRename('Orders by category')
+
+    const rowsSeen = chartRowsSeen()
+    const specsSeen = chartSpecsSeen()
+    // the renamed card's rows/chart_spec_json are exactly as before
+    expect(rowsSeen).toContainEqual(BAR_CARD.rows)
+    expect(specsSeen).toContainEqual(BAR_CARD.chart_spec_json)
+    // and the chart itself is still rendered (a <canvas> for the bar card)
+    expect(container.querySelectorAll('canvas').length).toBeGreaterThan(0)
+    // the sibling's rows/chart_spec_json are untouched
+    expect(rowsSeen).toContainEqual(NON_BAR_CARD.rows)
+    expect(specsSeen).toContainEqual(NON_BAR_CARD.chart_spec_json)
+  })
+
+  it('does not trigger an extra fetchDashboard call on a successful rename (no full refetch)', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockResolvedValue(RENAMED_BAR_CARD_DETAIL)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedFetchDashboard.mockClear()
+    await clickRename('Orders by category')
+    expect(mockedFetchDashboard).not.toHaveBeenCalled()
+  })
+
+  it('does not surface an error after a successful rename', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockResolvedValue(RENAMED_BAR_CARD_DETAIL)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(container.textContent).not.toMatch(/error/i)
+  })
+})
+
+describe('DashboardView - failed rename', () => {
+  it('leaves the title unchanged when renameCard rejects', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 404'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+
+    const texts = headingTexts()
+    expect(texts).toContain('Orders by category')
+    expect(texts).not.toContain('Orders by category (renamed)')
+    expect(texts).toContain('Revenue over time')
+  })
+
+  it('surfaces an actionError message when renameCard rejects, instead of failing silently', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 404'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(container.textContent).toMatch(/error/i)
+  })
+
+  it('surfaces the real rejection message somewhere in the rendered output', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 404'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(container.textContent).toContain('PATCH /api/cards/10 failed: 404')
+  })
+
+  it('does not blank the rest of the card list on a failed rename', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 404'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRename('Orders by category')
+    expect(headingTexts()).toHaveLength(2)
+  })
+
+  it('does not remove or alter the sibling card when a rename on a different card fails', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 404'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+    await clickRename('Orders by category')
+
+    expect(headingTexts()).toContain('Revenue over time')
+    expect(chartRowsSeen()).toContainEqual(NON_BAR_CARD.rows)
+  })
+
+  it('does not trigger an extra fetchDashboard call on a failed rename', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockPrompt('Orders by category (renamed)')
+    mockedRenameCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 404'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedFetchDashboard.mockClear()
+    await clickRename('Orders by category')
+    expect(mockedFetchDashboard).not.toHaveBeenCalled()
   })
 })

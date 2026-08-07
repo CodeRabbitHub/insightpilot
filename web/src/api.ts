@@ -40,7 +40,7 @@ export async function fetchConversation(id: number): Promise<ConversationDetail>
   return response.json()
 }
 
-export interface DashboardCardWithRows {
+export interface DashboardCardDetail {
   id: number
   dashboard_id: number
   title: string
@@ -49,6 +49,9 @@ export interface DashboardCardWithRows {
   chart_spec_json: Record<string, unknown>
   position: number
   created_at: string
+}
+
+export interface DashboardCardWithRows extends DashboardCardDetail {
   rows: Record<string, unknown>[]
 }
 
@@ -78,6 +81,18 @@ export async function runCard(id: number): Promise<DashboardCardWithRows> {
   const response = await fetch(`${API_BASE}/api/cards/${id}/run`, { method: 'POST' })
   if (!response.ok) {
     throw new Error(`POST /api/cards/${id}/run failed: ${response.status}`)
+  }
+  return response.json()
+}
+
+export async function renameCard(id: number, title: string): Promise<DashboardCardDetail> {
+  const response = await fetch(`${API_BASE}/api/cards/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  })
+  if (!response.ok) {
+    throw new Error(`PATCH /api/cards/${id} failed: ${response.status}`)
   }
   return response.json()
 }
