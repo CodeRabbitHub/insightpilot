@@ -1,84 +1,75 @@
 # Handoff
 
-Date: 2026-08-06
-Slice just completed: plans/briefs/2026-08-06-patch-dashboard-card-endpoint.md
-  + plans/logs/2026-08-06-patch-dashboard-card-endpoint.md
-  (commit 69671ff)
+Date: 2026-08-07
+Slice just completed: plans/briefs/2026-08-07-delete-dashboard-card-endpoint.md
+  + plans/logs/2026-08-07-delete-dashboard-card-endpoint.md
+  (commit 2097aa5)
 
 ## State of the work
 
-- **`app/main.py` gains `PATCH /api/cards/{card_id}`**: partially
-  updates an existing `DashboardCard`'s `title` and/or `position` —
-  whichever the request body supplies. A field omitted, or explicitly
-  `null`, leaves that column unchanged; an empty body `{}` is a 200
-  no-op, proven not to be a 422. 404s with `{"detail": "card not
-  found"}` if the card id doesn't exist. Response reuses the existing
-  `DashboardCardDetail` model (no `rows` — this route never touches or
-  re-validates `sql_text`).
-- One new Pydantic model backs it: `PatchDashboardCardRequest`
-  (`title: str | None = None`, `position: int | None = None`).
-- **No new pool, no new dependency**: same `async_session_factory`
-  used by every other dashboard-cards route; existing
-  `POST /api/dashboards/{id}/cards` and `GET /api/dashboards/{id}` are
-  completely untouched.
-- **`tests/test_api_dashboard_cards.py` gains 7 new test classes** (30
-  new test methods, 54 total in the file): rename-only, reposition-
-  only, both-fields, empty-body-no-op, unknown-id-404, plus two added
-  during no-slop review — falsy-new-values (`title:""`/`position:0`
-  actually applied, not skipped as falsy) and ignores-disallowed-fields
-  (`sql_text`/`dashboard_id`/`chart_spec_json`/`question_text` sent in
-  the same body as a legitimate `title` change, proven to have zero
-  effect). Every test cleans up its own card; none deletes the seeded
-  Overview dashboard row.
+- **`app/main.py` gains `DELETE /api/cards/{card_id}`**: deletes exactly
+  one existing `DashboardCard` row by id and returns 204 with no
+  response body — the first 204 route in this file (every other route
+  returns 200 with a JSON body). 404s with `{"detail": "card not
+  found"}` (matching `patch_dashboard_card`'s exact message) if the card
+  id doesn't exist, with zero writes in that case. Only the
+  `DashboardCard` row is removed; the parent `Dashboard` row is never
+  touched, regardless of whether the deleted card was its last one.
+- **No new Pydantic model, no new pool, no new dependency**: same
+  `async_session_factory` used by every other dashboard-cards route;
+  existing `POST /api/dashboards/{id}/cards`, `GET /api/dashboards/{id}`,
+  and `PATCH /api/cards/{id}` are completely untouched.
+- **`tests/test_api_dashboard_cards.py` gains 3 new test classes** (10
+  new test methods, 64 total in the file): happy path (204, empty body,
+  row genuinely gone via a fresh `async_session_factory` query — not
+  just trusting the response), unknown id (404, exact
+  `{"detail":"card not found"}` body, no phantom row), and sibling
+  isolation (deleting one card leaves a sibling card under the same
+  dashboard, and the dashboard row itself, completely untouched).
 - **Gate 2 all five checks green** (full record:
-  `artifacts/reviews/2026-08-06-patch-dashboard-card-endpoint.md`). Two
-  rounds of no-slop review both landed in the already-promoted
-  "Untested edges" category (`templates/no-slop.md`, promoted from
-  `2026-08-02-catalog-sync-cli.md`) — a third confirmation of that
-  standing rule, not a new pattern; no further promotion made.
+  `artifacts/reviews/2026-08-07-delete-dashboard-card-endpoint.md`).
+  No-slop review returned zero findings across all 10 categories on the
+  first pass — third straight dashboard-cards-route slice to land clean
+  first-pass once test-writer-first + a named sibling route to mirror
+  were both in place.
 - **Shipping proof went beyond `TestClient`**: a real `uvicorn` dev
-  server was started and hit with real `curl` — posted a real card
-  (id 851), PATCHed it title-only/position-only/both/empty-body (each
-  200, empty-body a true no-op returning the prior PATCH's values
-  unchanged), PATCHed an unknown id (404, exact `"card not found"`
-  detail), then deleted the proof card and confirmed via a fresh
-  `GET /api/dashboards/1` that it no longer appears. Dev server process
-  stopped afterward, confirmed via a follow-up request refusing the
-  connection.
+  server was started and hit with real `curl` — posted a real card (id
+  1187), confirmed it present via `GET /api/dashboards/1`, `DELETE`d it
+  (204, empty body), confirmed via a fresh `GET /api/dashboards/1` that
+  it no longer appears while sibling cards remain, then `DELETE`d an
+  unknown id (404, exact detail body). Dev server process stopped
+  afterward, confirmed via a follow-up request refusing the connection.
 
 ## Proof
 
 ```
 $ .venv/Scripts/python -m unittest discover -s tests -p "test_api_dashboard_cards.py" -v
-... (54 tests, including all pre-existing ones)
+...
 ----------------------------------------------------------------------
-Ran 54 tests in 8.738s
+Ran 64 tests in 16.708s
 
 OK
 ```
 
 Real-server shipping proof (independent of `TestClient`):
 ```
-=== POST a real card onto Overview (dashboard 1) ===
-HTTP 200: {"id":851,...,"title":"Proof card before PATCH",...,"position":42,...}
+=== POST a real proof card onto Overview (dashboard 1) ===
+{"id":1187,"dashboard_id":1,"title":"Delete-proof card",...,"position":77,...}
 
-=== PATCH title only ===
-{"id":851,...,"title":"Renamed by real PATCH",...,"position":42,...}
+=== GET dashboard 1 before DELETE - confirm proof card is present ===
+[957, 948, 949, 950, 951, 953, 955, 1187]
 
-=== PATCH position only ===
-{"id":851,...,"title":"Renamed by real PATCH",...,"position":0,...}
+=== DELETE the proof card ===
+HTTP/1.1 204 No Content
+(empty body)
 
-=== PATCH both ===
-{"id":851,...,"title":"Both changed",...,"position":99,...}
+=== GET dashboard 1 after DELETE - confirm proof card is gone, dashboard survives ===
+dashboard id: 1 name: Overview card ids: [948, 949, 950, 951, 953, 955, 957]
 
-=== PATCH empty body (no-op) ===
-{"id":851,...,"title":"Both changed",...,"position":99,...}   <- unchanged
-
-=== PATCH unknown id ===
-HTTP 404: {"detail":"card not found"}
+=== DELETE an unknown card id ===
+HTTP/1.1 404 Not Found
+{"detail":"card not found"}
 ```
-Proof card 851 deleted afterward; confirmed absent from a subsequent
-`GET /api/dashboards/1`.
 
 ## Open questions / known issues
 
@@ -119,74 +110,90 @@ Proof card 851 deleted afterward; confirmed absent from a subsequent
     `users` doesn't exist yet (F8).
   - `queries` table (PRD §7's fourth `app`-schema table) still doesn't
     exist — not needed until the pipeline-logging slice.
-  - `POST /api/cards/{id}/run` (re-execute exactly one card) and any
-    frontend "Pin"/card-actions UI (rename input, delete button,
-    drag-to-reposition) still don't exist — later slices.
+  - Any frontend "Pin"/card-actions UI (rename input, delete button,
+    drag-to-reposition) still doesn't exist — later slices.
   - Docker Desktop's daemon does not auto-start with this
     machine/session — if the next session's done-check fails with a
     Postgres connection refusal on port 5433, start Docker Desktop and
     run `docker compose up -d` before assuming a code regression.
+  - The dev Postgres `dashboards`/`dashboard_cards` tables have
+    accumulated leftover proof/test cards from prior sessions' real-
+    server shipping proofs (ids in the 940s-1180s range under the
+    seeded Overview dashboard) — harmless (every test scopes its
+    assertions to the specific ids it created, per this file's
+    established convention) but worth a cleanup pass eventually.
 
 ## Next slice (the brief, written NOW while context is hot)
 
 Goal:
-Add `DELETE /api/cards/{card_id}` to `app/main.py`: deletes an existing
-`DashboardCard` row by id and returns 204 with no body; 404s if the
-card id doesn't exist. Per PRD.md §8's `DELETE /api/cards/{id}` and
-§6's "Card actions: rename, delete, open originating chat."
+Add `POST /api/cards/{card_id}/run` to `app/main.py`: re-validates and
+re-executes exactly one existing `DashboardCard`'s stored `sql_text` and
+returns its fresh rows, without fetching the rest of its dashboard.
 
 Constraints:
-- Deletes exactly one `DashboardCard` row, identified by `card_id` in
-  the URL path — no request body, no query parameters.
-- 204 No Content on success (no response body, matching REST convention
-  for DELETE and distinct from every other route in this file, which
-  all return 200 with a JSON body) — 404 with `{"detail": "card not
-  found"}` (matching `patch_dashboard_card`'s exact message) if the id
-  doesn't exist, with zero writes in that case.
-- Only the `DashboardCard` row itself is removed. The parent
-  `Dashboard` row is never touched or deleted by this route, regardless
-  of whether the deleted card was its last remaining card.
+- Takes `card_id` from the URL path only — no request body, no query
+  parameters (the card's own stored `sql_text` is the only input to
+  execution; nothing about it is overridable via this route).
+- 404 with `{"detail": "card not found"}` (matching
+  `patch_dashboard_card`/`delete_dashboard_card`'s exact message) if the
+  card id doesn't exist, with zero validation/execution attempted in
+  that case.
+- Re-execution reuses `app/pipeline/answer.py`'s
+  `_validate_and_execute(sql)` — the same function `get_dashboard`
+  already calls per-card — not a hand-rolled validate/execute path.
+- If validation or execution fails (e.g. schema drift since the card
+  was pinned), the route responds 502 with a `detail` string, matching
+  `get_dashboard`'s existing upstream-pipeline-failure convention for
+  the same failure class — not a 200 with an error payload, not a 500.
+- Success response reuses the existing `DashboardCardWithRows` model
+  (card's persisted fields + fresh `rows`) — no new Pydantic model.
+- The app-schema read (fetching the `DashboardCard` row) must be closed
+  out (session closed) before `_validate_and_execute` runs, exactly like
+  `get_dashboard` already does, so the app pool never overlaps with the
+  two SQL pools `_validate_and_execute` uses.
 - No new pool, no new dependency: `app/db/session.py`'s
-  `async_session_factory` only, exactly like every other dashboard-cards
-  route in this file.
+  `async_session_factory` only.
 - Existing `POST /api/dashboards/{id}/cards`, `GET /api/dashboards/{id}`,
-  and `PATCH /api/cards/{id}` are untouched.
+  `PATCH /api/cards/{id}`, and `DELETE /api/cards/{id}` are untouched.
 
 Inputs:
-- PRD.md §8 (`DELETE /api/cards/{id}`), §6 ("Card actions: rename,
-  delete, open originating chat").
-- `app/main.py`'s `patch_dashboard_card` (existence-check-then-404 via
-  `session.get(DashboardCard, card_id)`, same 404 message shape) as the
-  closest existing pattern — here `session.delete(card)` +
-  `session.commit()` instead of mutate-and-return.
-- `tests/test_app_db.py`'s `_create_dashboard_card()`/
-  `_delete_dashboard_card()` helpers and
-  `tests/test_api_dashboard_cards.py`'s `TestClient`/real-DB pattern,
-  extended in place — same dashboard-cards surface, not a new domain.
-  Note `_delete_dashboard_card()` already exists as a test helper (used
-  for cleanup by every prior test in this file) — this brief adds the
-  real HTTP route, a distinct thing from that helper.
+- PRD.md §8 (`POST /api/cards/{id}/run`), §6 ("Card actions: rename,
+  delete, open originating chat" — re-run is this route's analytics
+  equivalent of "refresh this one card").
+- `app/main.py`'s `get_dashboard` (per-card `_validate_and_execute` call,
+  502-on-failure convention, session-closed-before-execution ordering)
+  and `delete_dashboard_card`/`patch_dashboard_card` (existence-check-
+  then-404 shape, exact 404 message) as the two patterns to combine.
+- `app/pipeline/answer.py`'s `_validate_and_execute(sql)` — returns
+  `(sql, rows)`; only `rows` is needed here.
+- `tests/test_api_dashboard_cards.py`'s `_create_dashboard_card`/
+  `_delete_dashboard_card`/`_fetch_card` helpers and `TestClient`/
+  real-DB pattern, extended in place — same dashboard-cards surface.
 
 Outputs:
-- `app/main.py` gains the `DELETE /api/cards/{card_id}` route (no new
-  Pydantic model needed — no request body, no meaningful response
-  body).
-- Test coverage (extend `tests/test_api_dashboard_cards.py`): happy
-  path (204 status, empty body, row genuinely gone via a fresh
-  `async_session_factory` query — not just trusting the response),
-  unknown card id (404, zero writes, matching this file's existing
-  404-body convention), and deleting one card leaves its sibling cards
-  under the same dashboard (and the dashboard row itself) untouched.
+- `app/main.py` gains the `POST /api/cards/{card_id}/run` route (reuses
+  `DashboardCardWithRows`, no new Pydantic model).
+- Test coverage (extend `tests/test_api_dashboard_cards.py`): happy path
+  (200, response has the card's persisted fields plus fresh `rows`
+  matching an independent `execute_sql`/`_validate_and_execute` call on
+  the same `sql_text` — mirroring `DashboardDetailHappyPathTests`'s
+  existing "rows match an independent real execution" pattern), unknown
+  card id (404, exact detail body, zero validation/execution attempted
+  — e.g. assert no exception path was hit some observable way, or at
+  minimum that the response is the plain 404 and not a 502), and a bad
+  `sql_text` on the card (502, `detail` string, no `rows` field) —
+  mirroring `DashboardDetailBadCardSqlTests`.
 
 Done-check:
 `.venv/Scripts/python -m unittest discover -s tests -p "test_api_dashboard_cards.py" -v`
 passing, pasted fresh.
 
 Out-of-scope:
-- `POST /api/cards/{id}/run` (re-execute exactly one card without
-  fetching the whole dashboard) — separate slice.
-- Cascading deletes of a `Dashboard` and all its cards — not requested
-  by PRD.md §8, which only lists a single-card `DELETE`.
-- Any frontend delete button / confirmation UI.
-- Bulk/multi-card delete (a single request removing several cards at
-  once) — this slice is one card, one `DELETE`.
+- Any frontend "refresh this card" button or UI.
+- Overriding or editing `sql_text` as part of this call — re-execution
+  only, no mutation (that's `PATCH /api/cards/{id}`'s job, and even it
+  never touches `sql_text`).
+- Re-running every card on a dashboard in one request — that's already
+  `GET /api/dashboards/{id}`'s job; this route is deliberately one card.
+- Caching or storing the fresh `rows` anywhere — same "no `rows` column
+  to cache" reasoning as `GET /api/dashboards/{id}`.
