@@ -1,5 +1,9 @@
 const API_BASE = "http://localhost:8000"
 
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
 export interface ConversationSummary {
   id: number
   title: string | null
@@ -32,6 +36,33 @@ export async function fetchConversation(id: number): Promise<ConversationDetail>
   const response = await fetch(`${API_BASE}/api/conversations/${id}`)
   if (!response.ok) {
     throw new Error(`GET /api/conversations/${id} failed: ${response.status}`)
+  }
+  return response.json()
+}
+
+export interface DashboardCardWithRows {
+  id: number
+  dashboard_id: number
+  title: string
+  question_text: string
+  sql_text: string
+  chart_spec_json: Record<string, unknown>
+  position: number
+  created_at: string
+  rows: Record<string, unknown>[]
+}
+
+export interface DashboardDetail {
+  id: number
+  name: string
+  created_at: string
+  cards: DashboardCardWithRows[]
+}
+
+export async function fetchDashboard(id: number): Promise<DashboardDetail> {
+  const response = await fetch(`${API_BASE}/api/dashboards/${id}`)
+  if (!response.ok) {
+    throw new Error(`GET /api/dashboards/${id} failed: ${response.status}`)
   }
   return response.json()
 }
