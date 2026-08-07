@@ -2299,3 +2299,84 @@ Date:   Sat Aug 8 00:15:21 2026 +0530
  web/tests/api.renameCard.test.ts                             | 116 ++++++++++++++++++++++++++++++++++++++++++++++++++++
  6 files changed, 740 insertions(+), 20 deletions(-)
 ```
+
+## Commit at 2026-08-08 00:17
+```
+commit 9a302a61db756591e3ee2fe56eb7c9a931b459d9
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 00:17:39 2026 +0530
+
+    Capture: dashboard-card-rename-button slice log
+    
+    Promotes a 2nd-repetition pattern to templates/no-slop.md: a third
+    occurrence of any parallel structure (state, handler, test helper,
+    component) gets extracted in the same slice that creates it, even when
+    the brief's Constraints spelled out the un-extracted, brief-literal
+    version -- per direct sign-off, citing this slice's actionError
+    consolidation alongside the rerun slice's mockFetchOnce extraction.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ plans/logs/2026-08-07-dashboard-card-rename-button.md | 66 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                           | 45 +++++++++++++++++++++++++++++++++++++++++++++
+ templates/no-slop.md                                  | 12 ++++++++++++
+ 3 files changed, 123 insertions(+)
+```
+
+## Commit at 2026-08-08 00:21
+```
+commit 24bfebf7e16a3511194d4fb47d6b9644cada545d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 00:21:13 2026 +0530
+
+    Handoff: rename-button slice done, next brief is drag-to-reposition
+    
+    Records verified state of the dashboard-card-rename-button slice
+    (actionError consolidation, the no-slop.md rule promotion, the
+    Playwright/npx-ESM scratchpad-install workaround) and writes the full
+    brief for the next slice: drag-to-reposition via the native HTML5
+    drag-and-drop API and the already-shipped PATCH /api/cards/{id}
+    position field.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ HANDOFF.md | 328 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------------------------------------
+ 1 file changed, 185 insertions(+), 143 deletions(-)
+```
+
+## Commit at 2026-08-08 01:58
+```
+commit 1cc55741328b0e05ae50365ad72abe2199b66480
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 01:58:37 2026 +0530
+
+    Add drag-to-reposition for pinned dashboard cards
+    
+    Native HTML5 drag-and-drop (draggable + dragstart/dragover/drop) on each
+    card's <li>, splicing the dragged card into the target's slot and
+    renumbering sequentially. Persists via the new repositionCard (mirrors
+    renameCard's PATCH+JSON shape) for every card whose position actually
+    changed, not just the dragged one; reverts the local order via the
+    shared actionError state if any persist call fails.
+    
+    No-slop review accepted two documented tradeoffs: a partial-failure can
+    leave the DB out of sync with the reverted UI until next reload (no
+    compensating rollback added, per user sign-off), and no onDragEnd
+    handler (no functional bug today). Shipping proof also surfaced a
+    pre-existing, unrelated React StrictMode double-fetch race in
+    DashboardView's original mount effect -- flagged for a future slice,
+    not fixed here.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-08-dashboard-card-drag-reposition.md | 153 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-08-dashboard-card-drag-reposition.md      |  96 ++++++++++++++++++++++++++++++++++++++++++++
+ web/src/api.ts                                                 |  12 ++++++
+ web/src/components/DashboardView.tsx                           |  51 +++++++++++++++++++++++-
+ web/tests/DashboardView.test.tsx                               | 301 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ web/tests/api.repositionCard.test.ts                           | 125 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 736 insertions(+), 2 deletions(-)
+```
