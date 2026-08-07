@@ -80,10 +80,30 @@
 // mocked alongside the other three api functions below; `window.prompt`
 // is stubbed per test via the `mockPrompt` helper and restored in the
 // shared `afterEach`.
+//
+// Extended again per
+// plans/briefs/2026-08-08-dashboard-card-drag-reposition.md with tests for
+// drag-to-reposition: dropping a card on another card's slot reorders the
+// rendered list immediately (optimistic), then calls the also-new
+// `repositionCard` (mocked alongside the other four api functions below)
+// with the renumbered (0, 1, 2, ...) position for every card whose
+// position actually changed -- not only the dragged card, since reordering
+// shifts siblings too -- and reverts the local order plus surfaces
+// `actionError` if any of those calls rejects, without corrupting cards
+// unrelated to the drag. The brief specifies the native HTML5
+// drag-and-drop API (`draggable` + `onDragStart`/`onDragOver`/`onDrop` on
+// each card's `<li>`, no library), which jsdom does not natively drive, so
+// the `dragCardOnto` helper below dispatches plain `dragstart`/`dragover`/
+// `drop` events directly at the source/target `<li>` elements, sharing one
+// fake `DataTransfer`-shaped object across all three (as a real drag
+// would) since jsdom's own `DragEvent`/`DataTransfer` support is
+// unreliable. A third bar-chart card fixture (`THIRD_CARD`) is added so a
+// drag can be exercised against a list where only some siblings' positions
+// shift, in addition to a full-reshuffle case.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { deleteCard, fetchDashboard, renameCard, runCard } from '../src/api'
+import { deleteCard, fetchDashboard, renameCard, repositionCard, runCard } from '../src/api'
 import { DashboardView } from '../src/components/DashboardView'
 import { ChartView } from '../src/components/ChartView'
 
@@ -92,6 +112,7 @@ vi.mock('../src/api', () => ({
   deleteCard: vi.fn(),
   runCard: vi.fn(),
   renameCard: vi.fn(),
+  repositionCard: vi.fn(),
 }))
 
 vi.mock('../src/components/ChartView', async () => {
@@ -112,6 +133,7 @@ const mockedFetchDashboard = fetchDashboard as unknown as ReturnType<typeof vi.f
 const mockedDeleteCard = deleteCard as unknown as ReturnType<typeof vi.fn>
 const mockedRunCard = runCard as unknown as ReturnType<typeof vi.fn>
 const mockedRenameCard = renameCard as unknown as ReturnType<typeof vi.fn>
+const mockedRepositionCard = repositionCard as unknown as ReturnType<typeof vi.fn>
 const mockedChartView = ChartView as unknown as ReturnType<typeof vi.fn>
 
 // Preserved so `window.prompt` (stubbed per rename test via `mockPrompt`)
@@ -166,6 +188,23 @@ const NON_BAR_CARD = {
   rows: [{ month: '2026-01', revenue: 1000 }],
 }
 
+// A third real-shaped card (bar chart, so its own <canvas>/rows are
+// independently checkable), added for the drag-to-reposition tests below
+// -- a three-card list is the minimum needed to distinguish "the dragged
+// card's own position changed" from "a sibling's position also shifted"
+// from "a sibling's position was unaffected by this particular drag".
+const THIRD_CARD = {
+  id: 12,
+  dashboard_id: 1,
+  title: 'Average order value',
+  question_text: 'What is the average order value by month?',
+  sql_text: 'SELECT month, avg(payment_value) FROM olist.orders GROUP BY 1',
+  chart_spec_json: { chart_type: 'bar', x: 'month', y: 'avg_value' },
+  position: 2,
+  created_at: '2026-08-01T00:00:00Z',
+  rows: [{ month: '2026-01', avg_value: 150 }],
+}
+
 // The real PATCH /api/cards/{id} response shape per the brief's Inputs
 // section: a `DashboardCardDetail` -- same id as BAR_CARD, new title,
 // but deliberately NO `rows` field (the route never touches rows). Used
@@ -200,6 +239,7 @@ beforeEach(() => {
   mockedDeleteCard.mockReset()
   mockedRunCard.mockReset()
   mockedRenameCard.mockReset()
+  mockedRepositionCard.mockReset()
   // `.mockClear()`, not `.mockReset()` -- resetting would also wipe the
   // call-through implementation set up in the `vi.mock` factory above,
   // which would break real chart rendering for every test.
@@ -304,6 +344,48 @@ function chartSpecsSeen(): Record<string, unknown>[] {
   return mockedChartView.mock.calls.map(
     ([props]) => (props as { chartSpec: Record<string, unknown> }).chartSpec,
   )
+}
+
+// Minimal HTML5 DataTransfer stand-in: jsdom does not implement a real
+// one, but a real drag shares a single DataTransfer instance across its
+// dragstart/dragover/drop events, so this is passed through to each
+// dispatched event the same way.
+class FakeDataTransfer {
+  private store: Record<string, string> = {}
+  dropEffect = 'move'
+  effectAllowed = 'move'
+  setData(format: string, data: string) {
+    this.store[format] = data
+  }
+  getData(format: string) {
+    return this.store[format] ?? ''
+  }
+}
+
+function dispatchDragEvent(el: HTMLElement, type: string, dataTransfer: FakeDataTransfer) {
+  // A plain Event, not `new DragEvent(...)` -- jsdom's own DragEvent
+  // construction/`dataTransfer` support is unreliable, so `dataTransfer`
+  // is attached directly instead, matching the one property
+  // (`onDragStart`/`onDragOver`/`onDrop` handlers) the brief's contract
+  // actually depends on.
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer, configurable: true })
+  el.dispatchEvent(event)
+}
+
+// Simulates dragging the card titled `fromTitle` and dropping it onto the
+// card titled `toTitle`'s slot, per the brief's Constraints (native HTML5
+// drag-and-drop: `draggable` + `onDragStart`/`onDragOver`/`onDrop` on each
+// card's `<li>`, no drag-and-drop library).
+async function dragCardOnto(fromTitle: string, toTitle: string) {
+  const fromLi = liForTitle(fromTitle)
+  const toLi = liForTitle(toTitle)
+  const dataTransfer = new FakeDataTransfer()
+  await act(async () => {
+    dispatchDragEvent(fromLi, 'dragstart', dataTransfer)
+    dispatchDragEvent(toLi, 'dragover', dataTransfer)
+    dispatchDragEvent(toLi, 'drop', dataTransfer)
+  })
 }
 
 describe('DashboardView - loading state', () => {
@@ -930,6 +1012,223 @@ describe('DashboardView - failed rename', () => {
     })
     mockedFetchDashboard.mockClear()
     await clickRename('Orders by category')
+    expect(mockedFetchDashboard).not.toHaveBeenCalled()
+  })
+})
+
+// Tests below are from
+// plans/briefs/2026-08-08-dashboard-card-drag-reposition.md.
+describe('DashboardView - drag-to-reposition, optimistic reorder', () => {
+  it('reorders the local list immediately on drop, before repositionCard resolves', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    // Never resolves -- isolates the assertion to the optimistic,
+    // pre-persistence reorder, per the brief's "reorder the local
+    // dashboard.cards array immediately (optimistic UI)" Constraint.
+    mockedRepositionCard.mockReturnValue(new Promise(() => {}))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    expect(headingTexts()).toEqual([
+      'Orders by category',
+      'Revenue over time',
+      'Average order value',
+    ])
+
+    // Drag the last card onto the first card's slot.
+    await dragCardOnto('Average order value', 'Orders by category')
+
+    expect(headingTexts()).toEqual([
+      'Average order value',
+      'Orders by category',
+      'Revenue over time',
+    ])
+  })
+
+  it('does not corrupt any card\'s own rows/chart_spec_json while reordering', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockReturnValue(new Promise(() => {}))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+    await dragCardOnto('Average order value', 'Orders by category')
+
+    const rowsSeen = chartRowsSeen()
+    expect(rowsSeen).toContainEqual(BAR_CARD.rows)
+    expect(rowsSeen).toContainEqual(THIRD_CARD.rows)
+    // NON_BAR_CARD is not chart_type 'bar' so ChartView is never invoked
+    // for it, per the existing bar/non-bar precedent above.
+  })
+})
+
+describe('DashboardView - drag-to-reposition, persisted positions', () => {
+  it('calls repositionCard with the correct renumbered position for every card whose position changed, including siblings shifted by the drag (not just the dragged card)', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockResolvedValue({ ...BAR_CARD, rows: undefined })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+
+    // Drag the last card (position 2) to the first slot (position 0):
+    // every one of the three cards' positions shifts, not only the
+    // dragged one.
+    await dragCardOnto('Average order value', 'Orders by category')
+
+    expect(mockedRepositionCard).toHaveBeenCalledWith(THIRD_CARD.id, 0)
+    expect(mockedRepositionCard).toHaveBeenCalledWith(BAR_CARD.id, 1)
+    expect(mockedRepositionCard).toHaveBeenCalledWith(NON_BAR_CARD.id, 2)
+    expect(mockedRepositionCard).toHaveBeenCalledTimes(3)
+  })
+
+  it('does not call repositionCard for a sibling whose position is unaffected by the drag', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockResolvedValue({ ...BAR_CARD, rows: undefined })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+
+    // Swap the first two cards; THIRD_CARD (already last) keeps position 2.
+    await dragCardOnto('Orders by category', 'Revenue over time')
+
+    expect(mockedRepositionCard).toHaveBeenCalledWith(NON_BAR_CARD.id, 0)
+    expect(mockedRepositionCard).toHaveBeenCalledWith(BAR_CARD.id, 1)
+    expect(mockedRepositionCard).not.toHaveBeenCalledWith(THIRD_CARD.id, expect.anything())
+    expect(mockedRepositionCard).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not trigger an extra fetchDashboard call on a successful reposition (no full refetch)', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockResolvedValue({ ...BAR_CARD, rows: undefined })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedFetchDashboard.mockClear()
+    await dragCardOnto('Orders by category', 'Revenue over time')
+    expect(mockedFetchDashboard).not.toHaveBeenCalled()
+  })
+
+  it('does not surface an error after a successful reposition', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockResolvedValue({ ...BAR_CARD, rows: undefined })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await dragCardOnto('Orders by category', 'Revenue over time')
+    expect(container.textContent).not.toMatch(/error/i)
+  })
+})
+
+describe('DashboardView - drag-to-reposition, failed persist', () => {
+  it('reverts the local order back to its pre-drag arrangement when a repositionCard call rejects', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    // Only the non-dragged sibling's persist call fails -- proves a
+    // revert happens even when the dragged card's own call would have
+    // succeeded, since the brief requires reverting "on any
+    // repositionCard failure".
+    mockedRepositionCard.mockImplementation((id: number) => {
+      if (id === NON_BAR_CARD.id) {
+        return Promise.reject(new Error('PATCH /api/cards/11 failed: 500'))
+      }
+      return Promise.resolve({ ...BAR_CARD, rows: undefined })
+    })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+
+    await dragCardOnto('Orders by category', 'Revenue over time')
+
+    expect(headingTexts()).toEqual([
+      'Orders by category',
+      'Revenue over time',
+      'Average order value',
+    ])
+  })
+
+  it('surfaces the failure via actionError instead of failing silently', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockImplementation((id: number) => {
+      if (id === NON_BAR_CARD.id) {
+        return Promise.reject(new Error('PATCH /api/cards/11 failed: 500'))
+      }
+      return Promise.resolve({ ...BAR_CARD, rows: undefined })
+    })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+
+    await dragCardOnto('Orders by category', 'Revenue over time')
+
+    expect(container.textContent).toMatch(/error/i)
+  })
+
+  it('surfaces the real rejection message somewhere in the rendered output', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockImplementation((id: number) => {
+      if (id === NON_BAR_CARD.id) {
+        return Promise.reject(new Error('PATCH /api/cards/11 failed: 500'))
+      }
+      return Promise.resolve({ ...BAR_CARD, rows: undefined })
+    })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+
+    await dragCardOnto('Orders by category', 'Revenue over time')
+
+    expect(container.textContent).toContain('PATCH /api/cards/11 failed: 500')
+  })
+
+  it("leaves a card unrelated to the drag's own rows/chart_spec_json untouched after a failed reposition", async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockImplementation((id: number) => {
+      if (id === NON_BAR_CARD.id) {
+        return Promise.reject(new Error('PATCH /api/cards/11 failed: 500'))
+      }
+      return Promise.resolve({ ...BAR_CARD, rows: undefined })
+    })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+
+    // The drag only involves BAR_CARD and NON_BAR_CARD; THIRD_CARD is
+    // unrelated to this drag entirely.
+    await dragCardOnto('Orders by category', 'Revenue over time')
+
+    expect(headingTexts()).toContain('Average order value')
+    expect(chartRowsSeen()).toContainEqual(THIRD_CARD.rows)
+  })
+
+  it('does not trigger an extra fetchDashboard call on a failed reposition', async () => {
+    mockedFetchDashboard.mockResolvedValue(
+      dashboardWithCards([BAR_CARD, NON_BAR_CARD, THIRD_CARD]),
+    )
+    mockedRepositionCard.mockRejectedValue(new Error('PATCH /api/cards/10 failed: 500'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedFetchDashboard.mockClear()
+    await dragCardOnto('Orders by category', 'Revenue over time')
     expect(mockedFetchDashboard).not.toHaveBeenCalled()
   })
 })

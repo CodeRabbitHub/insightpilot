@@ -4,6 +4,7 @@ import {
   errorMessage,
   fetchDashboard,
   renameCard,
+  repositionCard,
   runCard,
   type DashboardCardWithRows,
   type DashboardDetail,
@@ -20,6 +21,7 @@ export function DashboardView({ dashboardId }: { dashboardId: number }) {
   // Shared by delete/re-run/rename since each is a single button click at a
   // time -- no scenario needs their failures distinguished from each other.
   const [actionError, setActionError] = useState<string | null>(null)
+  const [draggedCardId, setDraggedCardId] = useState<number | null>(null)
 
   useEffect(() => {
     setLoading(true)
@@ -76,6 +78,38 @@ export function DashboardView({ dashboardId }: { dashboardId: number }) {
       .catch((e: unknown) => setActionError(errorMessage(e)))
   }
 
+  // Splice-out-then-splice-in at the target's index -- the standard list
+  // drag-reorder semantic, so dropping on a card's slot inserts the
+  // dragged card there and shifts that card (and everything after it)
+  // down one. Every slot whose occupant changed gets PATCHed, not just
+  // the dragged card, since a reorder shifts siblings too; any rejection
+  // reverts the whole list back to its pre-drag arrangement.
+  function handleDrop(targetCardId: number) {
+    const draggedId = draggedCardId
+    setDraggedCardId(null)
+    if (!dashboard || draggedId === null || draggedId === targetCardId) return
+
+    const previousCards = dashboard.cards
+    const fromIndex = previousCards.findIndex((c) => c.id === draggedId)
+    const toIndex = previousCards.findIndex((c) => c.id === targetCardId)
+    if (fromIndex === -1 || toIndex === -1) return
+
+    const reordered = [...previousCards]
+    const [dragged] = reordered.splice(fromIndex, 1)
+    reordered.splice(toIndex, 0, dragged)
+    const renumbered = reordered.map((c, i) => ({ ...c, position: i }))
+
+    setDashboard((prev) => (prev ? { ...prev, cards: renumbered } : prev))
+
+    const changed = renumbered.filter((c, i) => previousCards[i]?.id !== c.id)
+    Promise.all(changed.map((c) => repositionCard(c.id, c.position)))
+      .then(() => setActionError(null))
+      .catch((e: unknown) => {
+        setActionError(errorMessage(e))
+        setDashboard((prev) => (prev ? { ...prev, cards: previousCards } : prev))
+      })
+  }
+
   if (loading) return <p className="text-gray-500">Loading…</p>
   if (error) return <p className="text-red-600">Error: {error}</p>
   if (!dashboard) return null
@@ -88,7 +122,22 @@ export function DashboardView({ dashboardId }: { dashboardId: number }) {
       {actionError && <p className="text-red-600">Error: {actionError}</p>}
       <ul className="space-y-6">
         {dashboard.cards.map((card) => (
-          <li key={card.id}>
+          <li
+            key={card.id}
+            draggable
+            onDragStart={(e) => {
+              setDraggedCardId(card.id)
+              // Firefox refuses to start a native drag unless dragstart
+              // calls setData; nothing reads it back since draggedCardId
+              // already tracks the source card.
+              e.dataTransfer.setData('text/plain', String(card.id))
+            }}
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              handleDrop(card.id)
+            }}
+          >
             <div className="flex items-center justify-between">
               <h3 className="text-base font-medium">{card.title}</h3>
               <div className="flex items-center gap-2">

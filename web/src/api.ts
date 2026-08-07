@@ -97,6 +97,18 @@ export async function renameCard(id: number, title: string): Promise<DashboardCa
   return response.json()
 }
 
+export async function repositionCard(id: number, position: number): Promise<DashboardCardDetail> {
+  const response = await fetch(`${API_BASE}/api/cards/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ position }),
+  })
+  if (!response.ok) {
+    throw new Error(`PATCH /api/cards/${id} failed: ${response.status}`)
+  }
+  return response.json()
+}
+
 export interface Analysis {
   summary: string
   explanation: string
