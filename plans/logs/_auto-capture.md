@@ -2224,3 +2224,33 @@ Date:   Fri Aug 7 19:13:58 2026 +0530
  plans/logs/_auto-capture.md                           |  43 +++++++++++++++++++++++
  3 files changed, 281 insertions(+), 126 deletions(-)
 ```
+
+## Commit at 2026-08-07 21:11
+```
+commit a98a53c88fb4e29b5f36e925e9eb8910d69f0edb
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 21:11:46 2026 +0530
+
+    Add re-run button to pinned dashboard cards
+    
+    Mirrors the delete-button slice's shape: runCard() calls the existing
+    POST /api/cards/{id}/run and swaps that card's fresh chart_spec_json/rows
+    in place via a dedicated rerunError state, so a failed re-run can't blank
+    the whole card list. Also extracts the third copy of the fetch-mock test
+    helper into web/tests/helpers/mockFetch.ts (no-slop gate finding).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-07-dashboard-card-rerun-button.md | 107 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-dashboard-card-rerun-button.md      |  97 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                                 |  19 +++++++++++++
+ web/src/api.ts                                              |   8 ++++++
+ web/src/components/DashboardView.tsx                        |  38 ++++++++++++++++++++-----
+ web/tests/DashboardView.test.tsx                            | 214 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ web/tests/api.deleteCard.test.ts                            |  18 ++----------
+ web/tests/api.fetchDashboard.test.ts                        |  18 ++----------
+ web/tests/api.runCard.test.ts                               | 106 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/tests/helpers/mockFetch.ts                              |  20 ++++++++++++++
+ 10 files changed, 603 insertions(+), 42 deletions(-)
+```
