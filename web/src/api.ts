@@ -74,6 +74,14 @@ export async function deleteCard(id: number): Promise<void> {
   }
 }
 
+export async function runCard(id: number): Promise<DashboardCardWithRows> {
+  const response = await fetch(`${API_BASE}/api/cards/${id}/run`, { method: 'POST' })
+  if (!response.ok) {
+    throw new Error(`POST /api/cards/${id}/run failed: ${response.status}`)
+  }
+  return response.json()
+}
+
 export interface Analysis {
   summary: string
   explanation: string

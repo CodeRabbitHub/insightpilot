@@ -18,8 +18,9 @@
 // `GET /api/dashboards/{id}`, using `global.fetch` mocked directly (no
 // network, no MSW -- consistent with this repo's "no new dependencies
 // without asking").
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { fetchDashboard } from '../src/api'
+import { mockFetchOnce } from './helpers/mockFetch'
 
 // Real DashboardDetail/DashboardCardWithRows shape per the brief's Inputs
 // section (app/main.py's DashboardDetail response model): id, name,
@@ -43,21 +44,6 @@ const REAL_DASHBOARD_BODY = {
     },
   ],
 }
-
-function mockFetchOnce(response: { ok: boolean; status: number; body: unknown }) {
-  const jsonFn = vi.fn().mockResolvedValue(response.body)
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok: response.ok,
-    status: response.status,
-    json: jsonFn,
-  })
-  vi.stubGlobal('fetch', fetchMock)
-  return { fetchMock, jsonFn }
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
 
 describe('fetchDashboard', () => {
   it('calls GET on /api/dashboards/{id} for the given id', async () => {

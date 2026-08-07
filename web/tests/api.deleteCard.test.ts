@@ -16,23 +16,9 @@
 // `fetchDashboard`'s existing throw shape), and resolving with nothing
 // (`void`) on the real 204 empty-body success case -- explicitly without
 // attempting to parse a JSON body from that 204 response.
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { deleteCard } from '../src/api'
-
-function mockFetchOnce(response: { ok: boolean; status: number }) {
-  const jsonFn = vi.fn().mockResolvedValue({})
-  const fetchMock = vi.fn().mockResolvedValue({
-    ok: response.ok,
-    status: response.status,
-    json: jsonFn,
-  })
-  vi.stubGlobal('fetch', fetchMock)
-  return { fetchMock, jsonFn }
-}
-
-afterEach(() => {
-  vi.unstubAllGlobals()
-})
+import { mockFetchOnce } from './helpers/mockFetch'
 
 describe('deleteCard', () => {
   it('calls DELETE on /api/cards/{id} for the given id', async () => {

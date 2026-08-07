@@ -46,19 +46,55 @@
 // `../src/api` is still mocked at the module boundary, so `deleteCard` is
 // mocked alongside `fetchDashboard` below -- no real network/DELETE call is
 // made.
+//
+// Extended again per plans/briefs/2026-08-07-dashboard-card-rerun-button.md
+// with tests for a "Re-run" button per card: clicking it calls `runCard`
+// (mocked alongside `fetchDashboard`/`deleteCard` below) and, on success,
+// swaps that card's `chart_spec_json`/`rows` for the fresh response,
+// leaving siblings untouched, with no extra `fetchDashboard` refetch and no
+// error shown; on failure, the card's existing data is left unchanged and
+// an error is surfaced without blanking the rest of the list. The brief
+// explicitly calls out that the card's title text does NOT change on
+// re-run, so title alone can't prove a real data swap happened -- a
+// dedicated `REVISED_BAR_CARD` fixture (same `id: 10` as `BAR_CARD`, but
+// with a bumped row count) is used instead, and `ChartView` is spied on
+// (via `vi.fn(actual.ChartView)`, i.e. a call-through spy that still
+// renders for real) so the props DashboardView passes to it -- in
+// particular `rows` -- are directly inspectable. This spy preserves
+// ChartView's real rendering behavior (so the existing bar/non-bar canvas
+// assertions above are unaffected), it merely also records each call's
+// props.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
-import { deleteCard, fetchDashboard } from '../src/api'
+import { deleteCard, fetchDashboard, runCard } from '../src/api'
 import { DashboardView } from '../src/components/DashboardView'
+import { ChartView } from '../src/components/ChartView'
 
 vi.mock('../src/api', () => ({
   fetchDashboard: vi.fn(),
   deleteCard: vi.fn(),
+  runCard: vi.fn(),
 }))
+
+vi.mock('../src/components/ChartView', async () => {
+  const actual =
+    await vi.importActual<typeof import('../src/components/ChartView')>(
+      '../src/components/ChartView',
+    )
+  return {
+    ...actual,
+    // Call-through spy: real rendering behavior is preserved (`vi.fn`
+    // wraps, rather than replaces, `actual.ChartView`), so this only adds
+    // the ability to inspect what props each render call received.
+    ChartView: vi.fn(actual.ChartView),
+  }
+})
 
 const mockedFetchDashboard = fetchDashboard as unknown as ReturnType<typeof vi.fn>
 const mockedDeleteCard = deleteCard as unknown as ReturnType<typeof vi.fn>
+const mockedRunCard = runCard as unknown as ReturnType<typeof vi.fn>
+const mockedChartView = ChartView as unknown as ReturnType<typeof vi.fn>
 
 // Real card shapes per the brief's Inputs section (DashboardCardWithRows):
 // id, dashboard_id, title, question_text, sql_text, chart_spec_json,
@@ -74,6 +110,19 @@ const BAR_CARD = {
   created_at: '2026-08-01T00:00:00Z',
   rows: [
     { product_category_name: 'toys', count: 12 },
+    { product_category_name: 'books', count: 7 },
+  ],
+}
+
+// Same card id as BAR_CARD (a re-run replaces a card in place, it doesn't
+// create a new one), but with different `rows` -- the fresh result a
+// successful POST /api/cards/10/run would return. Used to prove the
+// re-run actually swapped in new data, since the title text is identical
+// to BAR_CARD's and can't be used as that proof on its own.
+const REVISED_BAR_CARD = {
+  ...BAR_CARD,
+  rows: [
+    { product_category_name: 'toys', count: 40 },
     { product_category_name: 'books', count: 7 },
   ],
 }
@@ -109,6 +158,11 @@ let root: Root
 beforeEach(() => {
   mockedFetchDashboard.mockReset()
   mockedDeleteCard.mockReset()
+  mockedRunCard.mockReset()
+  // `.mockClear()`, not `.mockReset()` -- resetting would also wipe the
+  // call-through implementation set up in the `vi.mock` factory above,
+  // which would break real chart rendering for every test.
+  mockedChartView.mockClear()
   container = document.createElement('div')
   document.body.appendChild(container)
   root = createRoot(container)
@@ -128,8 +182,8 @@ function headingTexts(): string[] {
 }
 
 // Finds the <li> whose own heading text matches the given card title, so
-// delete-button tests can act on "the button belonging to this card"
-// without assuming DOM ordering.
+// per-card action-button tests can act on "the button belonging to this
+// card" without assuming DOM ordering.
 function liForTitle(title: string): HTMLElement {
   const li = Array.from(container.querySelectorAll('li')).find((el) =>
     (el.textContent ?? '').includes(title),
@@ -151,6 +205,29 @@ async function clickDelete(title: string) {
   await act(async () => {
     button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
   })
+}
+
+function rerunButtonIn(li: HTMLElement): HTMLElement {
+  const button = Array.from(li.querySelectorAll('button')).find((b) =>
+    /re-?run/i.test(b.textContent ?? ''),
+  )
+  if (!button) throw new Error('no Re-run button found in <li>')
+  return button as HTMLElement
+}
+
+async function clickRerun(title: string) {
+  const button = rerunButtonIn(liForTitle(title))
+  await act(async () => {
+    button.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+  })
+}
+
+// Extracts the `rows` prop from each recorded ChartView call, for
+// asserting on which card's data a given render pass actually used.
+function chartRowsSeen(): Record<string, unknown>[][] {
+  return mockedChartView.mock.calls.map(
+    ([props]) => (props as { rows: Record<string, unknown>[] }).rows,
+  )
 }
 
 describe('DashboardView - loading state', () => {
@@ -412,5 +489,136 @@ describe('DashboardView - failed delete', () => {
     })
     await clickDelete('Orders by category')
     expect(headingTexts()).toHaveLength(2)
+  })
+})
+
+// Tests below are from plans/briefs/2026-08-07-dashboard-card-rerun-button.md.
+describe('DashboardView - re-run button presence', () => {
+  it("renders a Re-run button inside each card's <li>", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    expect(() => rerunButtonIn(liForTitle('Orders by category'))).not.toThrow()
+    expect(() => rerunButtonIn(liForTitle('Revenue over time'))).not.toThrow()
+  })
+
+  it('renders exactly one Re-run button per card -- not a shared/global one', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    const allRerunButtons = Array.from(container.querySelectorAll('button')).filter((b) =>
+      /re-?run/i.test(b.textContent ?? ''),
+    )
+    expect(allRerunButtons).toHaveLength(2)
+  })
+})
+
+describe('DashboardView - successful re-run', () => {
+  it("calls runCard with the clicked card's own id", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockResolvedValue(REVISED_BAR_CARD)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRerun('Orders by category')
+    expect(mockedRunCard).toHaveBeenCalledWith(BAR_CARD.id)
+  })
+
+  it("updates only the re-run card's data -- proven by ChartView receiving the fresh rows -- leaving the sibling's rows untouched", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockResolvedValue(REVISED_BAR_CARD)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+    await clickRerun('Orders by category')
+
+    const rowsSeen = chartRowsSeen()
+    expect(rowsSeen).toContainEqual(REVISED_BAR_CARD.rows)
+    // the stale, pre-rerun rows must no longer be what any card renders with
+    expect(rowsSeen).not.toContainEqual(BAR_CARD.rows)
+    // the sibling's own rows are exactly as before -- untouched
+    expect(rowsSeen).toContainEqual(NON_BAR_CARD.rows)
+
+    const texts = headingTexts()
+    expect(texts).toContain('Orders by category')
+    expect(texts).toContain('Revenue over time')
+  })
+
+  it('does not trigger an extra fetchDashboard call on a successful re-run (no full refetch)', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockResolvedValue(REVISED_BAR_CARD)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedFetchDashboard.mockClear()
+    await clickRerun('Orders by category')
+    expect(mockedFetchDashboard).not.toHaveBeenCalled()
+  })
+
+  it('does not surface an error after a successful re-run', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockResolvedValue(REVISED_BAR_CARD)
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRerun('Orders by category')
+    expect(container.textContent).not.toMatch(/error/i)
+  })
+})
+
+describe('DashboardView - failed re-run', () => {
+  it("leaves the card's existing rows unchanged when runCard rejects", async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockRejectedValue(new Error('POST /api/cards/10/run failed: 502'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+    await clickRerun('Orders by category')
+
+    const rowsSeen = chartRowsSeen()
+    expect(rowsSeen).toContainEqual(BAR_CARD.rows)
+    expect(rowsSeen).not.toContainEqual(REVISED_BAR_CARD.rows)
+
+    const texts = headingTexts()
+    expect(texts).toContain('Orders by category')
+    expect(texts).toContain('Revenue over time')
+  })
+
+  it('surfaces an error message when runCard rejects, instead of failing silently', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockRejectedValue(new Error('POST /api/cards/10/run failed: 502'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRerun('Orders by category')
+    expect(container.textContent).toMatch(/error/i)
+  })
+
+  it('surfaces the real rejection message somewhere in the rendered output', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockRejectedValue(new Error('POST /api/cards/10/run failed: 502'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await clickRerun('Orders by category')
+    expect(container.textContent).toContain('POST /api/cards/10/run failed: 502')
+  })
+
+  it('does not remove or alter the sibling card when a re-run on a different card fails', async () => {
+    mockedFetchDashboard.mockResolvedValue(dashboardWithCards([BAR_CARD, NON_BAR_CARD]))
+    mockedRunCard.mockRejectedValue(new Error('POST /api/cards/10/run failed: 502'))
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    mockedChartView.mockClear()
+    await clickRerun('Orders by category')
+
+    expect(headingTexts()).toHaveLength(2)
+    expect(headingTexts()).toContain('Revenue over time')
+    expect(chartRowsSeen()).toContainEqual(NON_BAR_CARD.rows)
   })
 })
