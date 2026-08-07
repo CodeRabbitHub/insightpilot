@@ -2127,3 +2127,38 @@ Date:   Fri Aug 7 16:02:39 2026 +0530
  web/tests/api.fetchDashboard.test.ts                    |  96 +++++++++++++++++++++++++++++++++++++++++++++++++++++
  7 files changed, 653 insertions(+), 21 deletions(-)
 ```
+
+## Commit at 2026-08-07 16:03
+```
+commit 531f0a541ea35743f17db8bd4db25a0346f6e596
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 16:03:57 2026 +0530
+
+    Capture: dashboard-view-frontend slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ plans/logs/2026-08-07-dashboard-view-frontend.md |  66 +++++++++++++++++++
+ plans/logs/_auto-capture.md                      | 545 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 611 insertions(+)
+```
+
+## Commit at 2026-08-07 17:22
+```
+commit a50a4848c2b8b3c76cd9e0c1257807121e86a4f0
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 17:22:19 2026 +0530
+
+    Extract duplicated DashboardCard->DashboardCardDetail mapping into _card_to_detail
+    
+    Four routes in app/main.py built the same 7-field construction by hand;
+    one helper now backs create/patch/run/get-dashboard with zero behavior
+    change (76/76 tests green, real-server proof of all four routes attached).
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ app/main.py                                             |  58 +++++++++++++++++-----------------------------------------
+ artifacts/reviews/2026-08-07-card-to-detail-refactor.md | 139 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-card-to-detail-refactor.md      |  57 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 3 files changed, 213 insertions(+), 41 deletions(-)
+```
