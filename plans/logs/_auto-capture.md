@@ -2162,3 +2162,46 @@ Date:   Fri Aug 7 17:22:19 2026 +0530
  plans/briefs/2026-08-07-card-to-detail-refactor.md      |  57 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  3 files changed, 213 insertions(+), 41 deletions(-)
 ```
+
+## Commit at 2026-08-07 17:49
+```
+commit 210980a46110e02a1da2b491ec1029e706f87d5c
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 17:49:56 2026 +0530
+
+    Capture: card-to-detail-refactor slice log
+    
+    Handoff: card-to-detail-refactor slice done, next brief is a delete button in DashboardView.tsx
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ HANDOFF.md                                       | 274 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++---------------------------------------------------------------------------
+ plans/logs/2026-08-07-card-to-detail-refactor.md |  55 +++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                      |  35 ++++++++++++++++++++
+ 3 files changed, 228 insertions(+), 136 deletions(-)
+```
+
+## Commit at 2026-08-07 19:08
+```
+commit 39f633182996590ce24657ec7b92d9ec960906c7
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 19:08:31 2026 +0530
+
+    Add delete button to pinned dashboard cards
+    
+    Wires the existing DELETE /api/cards/{id} route into DashboardView via a
+    new deleteCard() in api.ts, with per-card optimistic removal on success
+    and an inline error (separate from the page's initial-fetch error state,
+    which would otherwise blank the whole list) on failure.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-07-dashboard-card-delete-button.md | 131 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-dashboard-card-delete-button.md      |  77 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/src/api.ts                                               |   7 +++++++
+ web/src/components/DashboardView.tsx                         |  44 +++++++++++++++++++++++++++++++---------
+ web/tests/DashboardView.test.tsx                             | 156 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ web/tests/api.deleteCard.test.ts                             |  91 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 496 insertions(+), 10 deletions(-)
+```
