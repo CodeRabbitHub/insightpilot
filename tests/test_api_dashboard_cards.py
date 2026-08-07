@@ -145,6 +145,41 @@ above (here named `UNKNOWN_CARD_ID`) and asserts a 404 with a `detail`
 string in the body, matching this file's existing loose 404-detail
 convention (a `detail` key present and string-typed, not an exact-text
 assertion) used by `DashboardDetailUnknownIdTests` above.
+
+This file also covers the delete-dashboard-card-endpoint brief
+(plans/briefs/2026-08-07-delete-dashboard-card-endpoint.md): a real
+`DELETE /api/cards/{card_id}` route that deletes exactly one
+`DashboardCard` row by id and returns 204 with no body, or 404s with
+the exact body `{"detail": "card not found"}` (matching
+`patch_dashboard_card`'s message) if the id doesn't exist, with zero
+writes in that case, and never touches the parent `Dashboard` row or
+any sibling cards.
+
+`DeleteDashboardCardHappyPathTests` seeds one card under the seeded
+Overview dashboard via `test_app_db._create_dashboard_card()`, DELETEs
+it via `TestClient`, and asserts: the response is 204 with an empty
+body; and, separately, a fresh `_fetch_card()` call afterward returns
+`None` -- the row is genuinely gone, not just claimed gone by the
+response -- matching this file's established "verify via a fresh
+session" pattern. Since the card is deleted by the test itself, tearDown
+explicitly does not re-delete it (a no-op call would still be safe per
+`_delete_dashboard_card`'s own `if card is not None` guard, but this
+suite is explicit about the row already being gone).
+
+`DeleteDashboardCardUnknownIdTests` DELETEs the same `UNKNOWN_CARD_ID`
+sentinel used above and asserts an exact-match 404 body,
+`{"detail": "card not found"}` -- unlike this file's looser
+"has a detail string" 404 checks elsewhere, this brief's Constraints
+call for that exact message -- plus a fresh `_fetch_card()` proving no
+phantom row exists at that id.
+
+`DeleteDashboardCardSiblingIsolationTests` seeds two cards under the
+seeded Overview dashboard, DELETEs only the first, and asserts the first
+is gone (fresh fetch returns `None`) while the second (sibling) card's
+persisted fields are completely unchanged, and the Overview dashboard
+row itself still exists -- proving the route touches exactly one row,
+never the parent `Dashboard` or sibling `DashboardCard` rows. tearDown
+cleans up the surviving second card.
 """
 import asyncio
 import unittest
@@ -1332,6 +1367,212 @@ class PatchDashboardCardUnknownIdTests(unittest.TestCase):
             f"expected a 'detail' key in the 404 error body, got: {body!r}",
         )
         self.assertIsInstance(body["detail"], str)
+
+
+class DeleteDashboardCardHappyPathTests(unittest.TestCase):
+    """DELETE /api/cards/{id} against a real, freshly-seeded card under
+    the seeded Overview dashboard must return 204 with no response body,
+    and the row must be genuinely gone -- confirmed by a fresh
+    `_fetch_card()` call through a brand-new `async_session_factory`
+    session, not just by trusting the response's status code, matching
+    this file's established "verify via a fresh session" pattern (see
+    DashboardCardHappyPathTests above)."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                "Card that this test deletes",
+                "irrelevant question text for this test",
+                "select 1 as n",
+                {"type": "bar"},
+                0,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.delete(f"/api/cards/{self.card_id}")
+
+    def test_returns_204(self):
+        self.assertEqual(
+            self.response.status_code,
+            204,
+            "expected 204 No Content for DELETE /api/cards/{id} on an "
+            f"existing card, got {self.response.status_code}: "
+            f"{self.response.text}",
+        )
+
+    def test_response_body_is_empty(self):
+        self.assertEqual(
+            self.response.content,
+            b"",
+            "a 204 response must carry no body, got: "
+            f"{self.response.content!r}",
+        )
+
+    def test_row_is_genuinely_gone_in_a_fresh_session(self):
+        card = asyncio.run(_fetch_card(self.card_id))
+        self.assertIsNone(
+            card,
+            "expected the deleted card to be genuinely gone when "
+            "queried through a brand-new session, not just claimed "
+            f"gone by the 204 response, got: {card!r}",
+        )
+
+
+class DeleteDashboardCardUnknownIdTests(unittest.TestCase):
+    """DELETE /api/cards/{id} against a card id that does not exist must
+    404 with the exact body `{"detail": "card not found"}`, per this
+    brief's Constraints (matching `patch_dashboard_card`'s message) --
+    unlike this file's looser "has a detail string" 404 checks used by
+    PatchDashboardCardUnknownIdTests/DashboardDetailUnknownIdTests
+    above, this brief calls for an exact match. Uses the same large
+    fixed sentinel id (UNKNOWN_CARD_ID = 999_999_999) already defined in
+    this file, for the same race-avoidance reason as those tests."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        client = TestClient(app)
+        self.response = client.delete(f"/api/cards/{UNKNOWN_CARD_ID}")
+
+    def test_returns_404(self):
+        self.assertEqual(
+            self.response.status_code,
+            404,
+            "expected 404 for DELETE /api/cards/{id} with an unknown "
+            f"card id, got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_404_response_body_matches_the_exact_message(self):
+        self.assertEqual(
+            self.response.json(),
+            {"detail": "card not found"},
+            "expected the exact body {'detail': 'card not found'} per "
+            "the brief's Constraints, got: "
+            f"{self.response.json()!r}",
+        )
+
+    def test_no_phantom_row_exists_at_the_unknown_id(self):
+        card = asyncio.run(_fetch_card(UNKNOWN_CARD_ID))
+        self.assertIsNone(
+            card,
+            "expected no DashboardCard row to exist at the unknown "
+            "sentinel id after a 404 DELETE -- zero writes, no phantom "
+            f"row, got: {card!r}",
+        )
+
+
+class DeleteDashboardCardSiblingIsolationTests(unittest.TestCase):
+    """Deleting one DashboardCard row via DELETE /api/cards/{id} must
+    touch exactly that row -- never a sibling card under the same
+    dashboard, and never the parent Dashboard row itself. Seeds two real
+    cards under the seeded Overview dashboard, deletes only the first,
+    and asserts the second card's persisted fields are completely
+    unchanged and the Overview dashboard row still exists."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"test cards under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.first_title = "First card -- this one gets deleted"
+        self.first_question_text = "irrelevant question text for this test"
+        self.first_sql_text = "select 1 as n"
+        self.first_chart_spec_json = {"type": "bar"}
+        self.first_position = 0
+        self.first_card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.first_title,
+                self.first_question_text,
+                self.first_sql_text,
+                self.first_chart_spec_json,
+                self.first_position,
+            )
+        )
+
+        self.second_title = "Second card -- sibling, must survive"
+        self.second_question_text = "how many orders are there in total?"
+        self.second_sql_text = "select count(*) from olist.orders"
+        self.second_chart_spec_json = {"type": "number"}
+        self.second_position = 1
+        self.second_card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.second_title,
+                self.second_question_text,
+                self.second_sql_text,
+                self.second_chart_spec_json,
+                self.second_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.delete(f"/api/cards/{self.first_card_id}")
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.second_card_id))
+
+    def test_returns_204(self):
+        self.assertEqual(
+            self.response.status_code,
+            204,
+            "expected 204 for deleting the first card, got "
+            f"{self.response.status_code}: {self.response.text}",
+        )
+
+    def test_deleted_card_is_genuinely_gone(self):
+        card = asyncio.run(_fetch_card(self.first_card_id))
+        self.assertIsNone(
+            card,
+            f"expected the deleted first card to be gone, got: {card!r}",
+        )
+
+    def test_sibling_card_is_completely_unchanged(self):
+        sibling = asyncio.run(_fetch_card(self.second_card_id))
+        self.assertIsNotNone(
+            sibling,
+            "expected the sibling card to still exist after deleting "
+            "the first card -- DELETE must touch exactly one row",
+        )
+        self.assertEqual(sibling.dashboard_id, self.dashboard_id)
+        self.assertEqual(sibling.title, self.second_title)
+        self.assertEqual(sibling.question_text, self.second_question_text)
+        self.assertEqual(sibling.sql_text, self.second_sql_text)
+        self.assertEqual(sibling.chart_spec_json, self.second_chart_spec_json)
+        self.assertEqual(sibling.position, self.second_position)
+
+    def test_overview_dashboard_row_still_exists(self):
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertIn(
+            self.dashboard_id,
+            overview_ids,
+            "expected the seeded Overview dashboard row to still exist "
+            "after deleting one of its cards -- the parent Dashboard "
+            f"row must never be touched by this route, found: {overview_ids!r}",
+        )
 
 
 if __name__ == "__main__":

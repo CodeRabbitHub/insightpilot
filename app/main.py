@@ -405,6 +405,20 @@ async def get_dashboard(dashboard_id: int) -> DashboardDetail:
     )
 
 
+@app.delete("/api/cards/{card_id}", status_code=204)
+async def delete_dashboard_card(card_id: int) -> None:
+    """Deletes exactly one pinned card -- PRD Sec.8's
+    `DELETE /api/cards/{id}`. Only the DashboardCard row itself is
+    removed; the parent Dashboard row is never touched or deleted by
+    this route."""
+    async with async_session_factory() as session:
+        card = await session.get(DashboardCard, card_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="card not found")
+        await session.delete(card)
+        await session.commit()
+
+
 @app.patch("/api/cards/{card_id}", response_model=DashboardCardDetail)
 async def patch_dashboard_card(
     card_id: int, request: PatchDashboardCardRequest
