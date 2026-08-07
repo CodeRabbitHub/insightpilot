@@ -101,6 +101,19 @@ class PatchDashboardCardRequest(BaseModel):
     position: int | None = None
 
 
+def _card_to_detail(card: DashboardCard) -> DashboardCardDetail:
+    return DashboardCardDetail(
+        id=card.id,
+        dashboard_id=card.dashboard_id,
+        title=card.title,
+        question_text=card.question_text,
+        sql_text=card.sql_text,
+        chart_spec_json=card.chart_spec_json,
+        position=card.position,
+        created_at=card.created_at,
+    )
+
+
 async def _persist_exchange(question: str, response: AskResponse) -> None:
     """Persist one Conversation plus its user/assistant Message pair
     through app/db's pool -- called only after get_answer() has already
@@ -341,16 +354,7 @@ async def create_dashboard_card(
         )
         session.add(card)
         await session.flush()
-        result = DashboardCardDetail(
-            id=card.id,
-            dashboard_id=card.dashboard_id,
-            title=card.title,
-            question_text=card.question_text,
-            sql_text=card.sql_text,
-            chart_spec_json=card.chart_spec_json,
-            position=card.position,
-            created_at=card.created_at,
-        )
+        result = _card_to_detail(card)
         await session.commit()
     return result
 
@@ -384,17 +388,7 @@ async def get_dashboard(dashboard_id: int) -> DashboardDetail:
         except Exception as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         card_details.append(
-            DashboardCardWithRows(
-                id=card.id,
-                dashboard_id=card.dashboard_id,
-                title=card.title,
-                question_text=card.question_text,
-                sql_text=card.sql_text,
-                chart_spec_json=card.chart_spec_json,
-                position=card.position,
-                created_at=card.created_at,
-                rows=rows,
-            )
+            DashboardCardWithRows(**_card_to_detail(card).model_dump(), rows=rows)
         )
 
     return DashboardDetail(
@@ -438,16 +432,7 @@ async def patch_dashboard_card(
         if request.position is not None:
             card.position = request.position
         await session.flush()
-        result = DashboardCardDetail(
-            id=card.id,
-            dashboard_id=card.dashboard_id,
-            title=card.title,
-            question_text=card.question_text,
-            sql_text=card.sql_text,
-            chart_spec_json=card.chart_spec_json,
-            position=card.position,
-            created_at=card.created_at,
-        )
+        result = _card_to_detail(card)
         await session.commit()
     return result
 
@@ -465,16 +450,7 @@ async def run_dashboard_card(card_id: int) -> DashboardCardWithRows:
         card = await session.get(DashboardCard, card_id)
         if card is None:
             raise HTTPException(status_code=404, detail="card not found")
-        card_detail = DashboardCardDetail(
-            id=card.id,
-            dashboard_id=card.dashboard_id,
-            title=card.title,
-            question_text=card.question_text,
-            sql_text=card.sql_text,
-            chart_spec_json=card.chart_spec_json,
-            position=card.position,
-            created_at=card.created_at,
-        )
+        card_detail = _card_to_detail(card)
 
     try:
         _, rows = await _validate_and_execute(card_detail.sql_text)
