@@ -2254,3 +2254,48 @@ Date:   Fri Aug 7 21:11:46 2026 +0530
  web/tests/helpers/mockFetch.ts                              |  20 ++++++++++++++
  10 files changed, 603 insertions(+), 42 deletions(-)
 ```
+
+## Commit at 2026-08-07 21:14
+```
+commit 024473e7b0294f8227b339b291f91010f4bcaeae
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 21:14:49 2026 +0530
+
+    Capture: dashboard-card-rerun-button slice log
+    
+    Handoff: re-run button slice done, next brief is a rename input in DashboardView.tsx
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ plans/logs/2026-08-07-dashboard-card-rerun-button.md | 76 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                          | 30 ++++++++++++++++++++++++++++++
+ 2 files changed, 106 insertions(+)
+```
+
+## Commit at 2026-08-08 00:15
+```
+commit 41c015323068ef2c1927821160a4cb6ae5176099
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 00:15:21 2026 +0530
+
+    Add rename button to pinned dashboard cards
+    
+    Calls PATCH /api/cards/{id} via a native window.prompt, merging only
+    title into card state so rows/chart_spec_json survive the response's
+    lack of a rows field. No-slop review also consolidated the three
+    per-action error states (delete/rerun/rename) into one shared
+    actionError, resolving the third-occurrence duplication that pattern
+    had grown into.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-07-dashboard-card-rename-button.md | 142 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-dashboard-card-rename-button.md      | 101 +++++++++++++++++++++++++++++++++++++++++++++
+ web/src/api.ts                                               |  17 +++++++-
+ web/src/components/DashboardView.tsx                         |  69 +++++++++++++++++++++++--------
+ web/tests/DashboardView.test.tsx                             | 315 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ web/tests/api.renameCard.test.ts                             | 116 ++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 6 files changed, 740 insertions(+), 20 deletions(-)
+```

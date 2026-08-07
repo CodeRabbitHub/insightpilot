@@ -28,6 +28,18 @@ Dead code is a lie about what the program does. Delete it.
 - [ ] No copy-pasted blocks with minor edits — third occurrence means extract
 - [ ] No parallel structures that must be kept in sync by hand
 - [ ] Shared logic lives in one place
+- [ ] A third occurrence of ANY parallel structure — state, handler, test
+      helper, button/component, not just a copy-pasted code block — is
+      extracted in the same slice that creates it, even when the brief's
+      Constraints spelled out the un-extracted, brief-literal version.
+      Flag the deviation to the user rather than silently deferring it or
+      silently overriding the brief (caught twice: 2026-08-07
+      dashboard-card-rerun-button's third `mockFetchOnce` copy extracted
+      to `web/tests/helpers/mockFetch.ts`; 2026-08-07
+      dashboard-card-rename-button's third `{action}Error` state/handler
+      triplet — despite the brief explicitly asking for a fourth
+      `renameError` state — consolidated into one shared `actionError` +
+      `updateCard()` helper instead, by explicit user choice)
 
 ## 4. Naming
 
