@@ -450,3 +450,34 @@ async def patch_dashboard_card(
         )
         await session.commit()
     return result
+
+
+@app.post("/api/cards/{card_id}/run", response_model=DashboardCardWithRows)
+async def run_dashboard_card(card_id: int) -> DashboardCardWithRows:
+    """Re-runs exactly one pinned card -- PRD Sec.8's
+    `POST /api/cards/{id}/run`. Narrows get_dashboard()'s per-card
+    pattern (existence check -> close the app session -> validate/
+    execute -> 502 on failure) to a single card: the app-schema read is
+    closed out before _validate_and_execute() runs, so the app pool
+    never overlaps with the two SQL pools it uses. sql_text itself is
+    never mutated -- this is re-execution only, PATCH's job."""
+    async with async_session_factory() as session:
+        card = await session.get(DashboardCard, card_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="card not found")
+        card_detail = DashboardCardDetail(
+            id=card.id,
+            dashboard_id=card.dashboard_id,
+            title=card.title,
+            question_text=card.question_text,
+            sql_text=card.sql_text,
+            chart_spec_json=card.chart_spec_json,
+            position=card.position,
+            created_at=card.created_at,
+        )
+
+    try:
+        _, rows = await _validate_and_execute(card_detail.sql_text)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return DashboardCardWithRows(**card_detail.model_dump(), rows=rows)

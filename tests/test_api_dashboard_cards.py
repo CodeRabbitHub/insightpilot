@@ -180,6 +180,51 @@ persisted fields are completely unchanged, and the Overview dashboard
 row itself still exists -- proving the route touches exactly one row,
 never the parent `Dashboard` or sibling `DashboardCard` rows. tearDown
 cleans up the surviving second card.
+
+This file also covers the run-dashboard-card-endpoint brief
+(plans/briefs/2026-08-07-run-dashboard-card-endpoint.md): a real
+`POST /api/cards/{card_id}/run` route that re-validates and re-executes
+exactly one existing `DashboardCard`'s stored `sql_text` (via
+`app/pipeline/answer.py`'s `_validate_and_execute`, the same function
+`get_dashboard` already calls per-card) and returns the card's
+persisted fields plus fresh `rows` -- reusing the same
+`DashboardCardWithRows` shape as `GET /api/dashboards/{id}`'s per-card
+entries -- or 404s with the exact body `{"detail": "card not found"}`
+(matching `patch_dashboard_card`/`delete_dashboard_card`'s message) if
+the card id doesn't exist, or 502s with a `detail` string (and no
+`rows` field) if validation/execution fails, matching `get_dashboard`'s
+existing upstream-pipeline-failure convention. These tests seed their
+fixture card(s) directly via `test_app_db._create_dashboard_card()`,
+same as the GET-detail and PATCH/DELETE tests above, since this is a
+re-execution test, not a creation-path test.
+
+`RunDashboardCardHappyPathTests` seeds one real card under the seeded
+Overview dashboard, POSTs to `/api/cards/{id}/run` with no body, and
+asserts: a 200; the response has exactly the same
+`EXPECTED_CARD_WITH_ROWS_FIELDS` shape as a `GET /api/dashboards/{id}`
+card entry (the brief's "reuses `DashboardCardWithRows`, no new
+Pydantic model" Constraint); every persisted field (title,
+question_text, sql_text, chart_spec_json, position, dashboard_id,
+created_at) echoes the seeded values unchanged; and `rows` matches an
+independent, real `app.pipeline.execute_sql.execute_sql()` call on the
+exact same `sql_text` -- mirroring `DashboardDetailHappyPathTests`'s
+own "rows match an independent real execution" proof, adapted to this
+single-card route.
+
+`RunDashboardCardUnknownIdTests` POSTs to
+`/api/cards/{UNKNOWN_CARD_ID}/run` using the same large fixed sentinel
+id already defined in this file, and asserts an exact-match 404 body,
+`{"detail": "card not found"}`, per the brief's Constraints (matching
+`DeleteDashboardCardUnknownIdTests`'s exact-match convention above,
+since this brief also specifies that exact message).
+
+`RunDashboardCardBadSqlTests` seeds one card whose `sql_text` is
+deliberately invalid against the real catalog (a table that does not
+exist), simulating schema drift since the card was pinned -- mirroring
+`DashboardDetailBadCardSqlTests`'s fixture above -- POSTs to
+`/api/cards/{id}/run`, and asserts a 502 with a `detail` string present
+and no `rows` field in the body, per the brief's "502 with a detail
+string... not a 200 with an error payload, not a 500" Constraint.
 """
 import asyncio
 import unittest
@@ -1572,6 +1617,221 @@ class DeleteDashboardCardSiblingIsolationTests(unittest.TestCase):
             "expected the seeded Overview dashboard row to still exist "
             "after deleting one of its cards -- the parent Dashboard "
             f"row must never be touched by this route, found: {overview_ids!r}",
+        )
+
+
+class RunDashboardCardHappyPathTests(unittest.TestCase):
+    """POST /api/cards/{id}/run against a real, freshly-seeded card
+    under the seeded Overview dashboard must re-execute that card's own
+    persisted `sql_text` and return 200 with the card's persisted
+    fields (title, question_text, sql_text, chart_spec_json, position,
+    dashboard_id, created_at, id) plus fresh `rows` -- exactly the same
+    `EXPECTED_CARD_WITH_ROWS_FIELDS` shape as a GET /api/dashboards/{id}
+    per-card entry (the brief's "reuses DashboardCardWithRows, no new
+    Pydantic model" Constraint). The `rows` value is checked against an
+    independent, real `app.pipeline.execute_sql.execute_sql()` call on
+    the exact same sql_text, mirroring
+    DashboardDetailHappyPathTests's own "fresh, not stale" proof."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.seeded_title = "Card this test re-runs via POST /run"
+        self.seeded_question_text = "how many orders are there in total?"
+        self.seeded_sql_text = "select count(*) from olist.orders"
+        self.seeded_chart_spec_json = {"type": "number"}
+        self.seeded_position = 6
+
+        self.card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                self.seeded_title,
+                self.seeded_question_text,
+                self.seeded_sql_text,
+                self.seeded_chart_spec_json,
+                self.seeded_position,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.post(f"/api/cards/{self.card_id}/run")
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.card_id))
+
+    def test_returns_200(self):
+        self.assertEqual(
+            self.response.status_code,
+            200,
+            "expected 200 for POST /api/cards/{id}/run on an existing "
+            f"card, got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_response_has_exactly_the_card_with_rows_fields(self):
+        body = self.response.json()
+        self.assertEqual(
+            set(body.keys()),
+            EXPECTED_CARD_WITH_ROWS_FIELDS,
+            "expected the response to reuse DashboardCardWithRows' exact "
+            "fields (the persisted card fields plus 'rows'), no new "
+            f"Pydantic model, got: {body!r}",
+        )
+
+    def test_response_id_and_dashboard_id_match_the_seeded_card(self):
+        body = self.response.json()
+        self.assertEqual(body["id"], self.card_id)
+        self.assertEqual(body["dashboard_id"], self.dashboard_id)
+
+    def test_response_echoes_the_seeded_persisted_fields_unchanged(self):
+        body = self.response.json()
+        self.assertEqual(body["title"], self.seeded_title)
+        self.assertEqual(body["question_text"], self.seeded_question_text)
+        self.assertEqual(body["sql_text"], self.seeded_sql_text)
+        self.assertEqual(body["chart_spec_json"], self.seeded_chart_spec_json)
+        self.assertEqual(body["position"], self.seeded_position)
+
+    def test_response_has_a_created_at_timestamp(self):
+        body = self.response.json()
+        self.assertIsInstance(body["created_at"], str)
+        self.assertGreater(len(body["created_at"].strip()), 0)
+
+    def test_rows_match_an_independent_real_execute_sql_call_on_the_same_sql_text(
+        self,
+    ):
+        # Mirrors DashboardDetailHappyPathTests's own proof: there is no
+        # rows column on DashboardCard to have served a cached value
+        # from, so the only way this response's rows could match an
+        # independent, real re-execution of the exact same sql_text is
+        # if the route actually re-ran it fresh via _validate_and_execute.
+        body = self.response.json()
+        independent_rows = asyncio.run(execute_sql(self.seeded_sql_text))
+        self.assertEqual(
+            body["rows"],
+            independent_rows,
+            "expected the response's rows to match an independent, real "
+            "app.pipeline.execute_sql.execute_sql() call on the exact "
+            "same sql_text, proving the route re-executed it fresh "
+            "rather than returning a stale/cached value",
+        )
+
+    def test_rows_field_is_a_nonempty_list_of_dicts(self):
+        body = self.response.json()
+        rows = body["rows"]
+        self.assertIsInstance(rows, list)
+        self.assertGreater(len(rows), 0, f"expected non-empty rows, got: {rows!r}")
+        for row in rows:
+            self.assertIsInstance(row, dict)
+
+
+class RunDashboardCardUnknownIdTests(unittest.TestCase):
+    """POST /api/cards/{id}/run against a card id that does not exist
+    must 404 with the exact body `{"detail": "card not found"}",
+    matching `patch_dashboard_card`/`delete_dashboard_card`'s message
+    per this brief's Constraints. Uses the same large fixed sentinel id
+    (UNKNOWN_CARD_ID = 999_999_999) already defined in this file, for
+    the same race-avoidance reason as
+    PatchDashboardCardUnknownIdTests/DeleteDashboardCardUnknownIdTests
+    above."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        client = TestClient(app)
+        self.response = client.post(f"/api/cards/{UNKNOWN_CARD_ID}/run")
+
+    def test_returns_404(self):
+        self.assertEqual(
+            self.response.status_code,
+            404,
+            "expected 404 for POST /api/cards/{id}/run with an unknown "
+            f"card id, got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_404_response_body_matches_the_exact_message(self):
+        self.assertEqual(
+            self.response.json(),
+            {"detail": "card not found"},
+            "expected the exact body {'detail': 'card not found'} per "
+            "the brief's Constraints, got: "
+            f"{self.response.json()!r}",
+        )
+
+
+class RunDashboardCardBadSqlTests(unittest.TestCase):
+    """POST /api/cards/{id}/run against a card whose sql_text no longer
+    validates/executes (here, a reference to a table that does not
+    exist in the real catalog, simulating schema drift since the card
+    was pinned -- mirroring DashboardDetailBadCardSqlTests's fixture
+    above) must 502 with a `detail` string, and the body must carry no
+    `rows` field -- matching get_dashboard's existing upstream-pipeline-
+    failure convention (HTTPException(status_code=502,
+    detail=str(exc))), not a 200 with an error payload, not a 500."""
+
+    def setUp(self):
+        if _IMPORT_ERROR is not None:
+            self.fail(f"could not import required modules: {_IMPORT_ERROR!r}")
+
+        overview_ids = asyncio.run(_get_overview_dashboard_ids())
+        self.assertEqual(
+            len(overview_ids),
+            1,
+            "expected exactly one seeded 'Overview' dashboard row to pin "
+            f"a test card under, found {len(overview_ids)}: {overview_ids!r}",
+        )
+        self.dashboard_id = overview_ids[0]
+
+        self.bad_card_id = asyncio.run(
+            _create_dashboard_card(
+                self.dashboard_id,
+                "Card with SQL that no longer validates, re-run via /run",
+                "irrelevant question text for this test",
+                "select * from nonexistent_table",
+                {"type": "bar"},
+                0,
+            )
+        )
+
+        client = TestClient(app)
+        self.response = client.post(f"/api/cards/{self.bad_card_id}/run")
+
+    def tearDown(self):
+        asyncio.run(_delete_dashboard_card(self.bad_card_id))
+
+    def test_returns_502_not_200_not_500(self):
+        self.assertEqual(
+            self.response.status_code,
+            502,
+            "expected 502 when a card's sql_text no longer validates or "
+            f"executes, got {self.response.status_code}: {self.response.text}",
+        )
+
+    def test_502_response_body_has_a_detail_string(self):
+        body = self.response.json()
+        self.assertIn(
+            "detail",
+            body,
+            f"expected a 'detail' key in the 502 error body, got: {body!r}",
+        )
+        self.assertIsInstance(body["detail"], str)
+
+    def test_502_response_body_has_no_rows_field(self):
+        body = self.response.json()
+        self.assertNotIn(
+            "rows",
+            body,
+            "expected the 502 error body to carry no 'rows' field at "
+            f"all -- no partial/degraded payload, got: {body!r}",
         )
 
 
