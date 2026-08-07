@@ -1582,3 +1582,548 @@ Date:   Wed Aug 5 18:30:08 2026 +0530
  plans/logs/_auto-capture.md             | 142 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  2 files changed, 226 insertions(+)
 ```
+
+## Commit at 2026-08-05 18:59
+```
+commit 88088d3281a6551454ab303e99d223f28896f4cf
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 18:59:45 2026 +0530
+
+    Handoff: analyze-answer slice done, next brief is wiring it into get_answer()
+    
+    HANDOFF.md rewritten with this session's verified state (analyze_answer()
+    proven standalone, the four real gaps Gate 2 caught and fixed, the
+    unfixed-elsewhere ThinkingBlock pattern flagged for awareness) and the
+    next brief: wire analyze_answer() into get_answer() itself, and thread the
+    resulting AnalyzeResponse through app/main.py's AskResponse/
+    ConversationMessageResult and message persistence -- frontend rendering
+    stays out of scope for that slice too.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ HANDOFF.md                  | 384 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------------------
+ plans/logs/_auto-capture.md |  24 +++++++++++
+ 2 files changed, 220 insertions(+), 188 deletions(-)
+```
+
+## Commit at 2026-08-05 22:20
+```
+commit 8d1f60e0f83ea57a1ea2325dca5072838ee2b737
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 22:20:09 2026 +0530
+
+    Wire analyze_answer() into get_answer() and app/main.py's responses
+    
+    get_answer() now calls analyze_answer() itself right after a successful
+    validate+execute and returns (sql, rows, analysis); AskResponse and
+    ConversationMessageResult gain a nested analysis field so all three
+    endpoints and persisted messages carry real summary/explanation/
+    chart_spec/follow_ups data. Also bumps the Stop hook's test-suite
+    timeout (600s -> 1200s) since this slice's extra Anthropic call pushed
+    real full-suite runtime past the old limit.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ .claude/hooks/stop_verify.py                        |  29 +++++++--------
+ app/main.py                                         |  16 +++++---
+ app/pipeline/answer.py                              |  22 ++++++++---
+ app/pipeline/verify_analyze_answer.py               |   4 +-
+ app/pipeline/verify_answer.py                       |   6 +--
+ artifacts/reviews/2026-08-05-wire-analyze-answer.md | 191 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ evals/run.py                                        |   2 +-
+ plans/briefs/2026-08-05-wire-analyze-answer.md      |  88 ++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_analyze_answer.py                        |  20 +++++++++-
+ tests/test_api_ask.py                               |  88 ++++++++++++++++++++++++++++++++++++++++----
+ tests/test_api_ask_stream.py                        |  47 +++++++++++++++++++++---
+ tests/test_api_conversations.py                     |  54 +++++++++++++++++++++++++--
+ tests/test_api_conversations_read.py                |  33 +++++++++++++++--
+ tests/test_question_parameter.py                    |  36 ++++++++++++++++--
+ tests/test_wire_analyze_answer.py                   | 298 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 15 files changed, 876 insertions(+), 58 deletions(-)
+```
+
+## Commit at 2026-08-05 22:24
+```
+commit 745a797e3d1163e9b86d9a60d5136895da080bd9
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 22:24:02 2026 +0530
+
+    Promote: lock stop_verify.py against concurrent full-suite runs
+    
+    Second occurrence of a background full-suite test run racing this
+    hook's own automatic run against the same live Postgres DB, corrupting
+    shared rows mid-test (first: 2026-08-03 repair-loop; second: this
+    session's wire-analyze-answer slice). Per the ratchet rule, promotes the
+    fix from a documented lesson to a hook-level file lock (.claude/.suite_lock,
+    gitignored) so two full-suite runs can never touch the DB at once again.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ .claude/hooks/stop_verify.py | 53 +++++++++++++++++++++++++++++++++++++++++++++++------
+ .gitignore                   |  1 +
+ 2 files changed, 48 insertions(+), 6 deletions(-)
+```
+
+## Commit at 2026-08-05 22:25
+```
+commit e9f52781b72a95407ca2e42491bdaabf87c2220f
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 22:25:12 2026 +0530
+
+    Capture: wire-analyze-answer slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ plans/logs/2026-08-05-wire-analyze-answer.md | 108 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 108 insertions(+)
+```
+
+## Commit at 2026-08-05 23:19
+```
+commit 54361ea903de0303a8b22d7ee4f1058d8888ca7d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Wed Aug 5 23:19:52 2026 +0530
+
+    Handoff: wire-analyze-answer slice done, next brief is ECharts chart rendering
+    
+    HANDOFF.md rewritten with this session's verified state (analyze_answer()
+    wired into get_answer() and app/main.py's responses end-to-end, the
+    redundant-LLM-call no-slop fix, the Stop-hook concurrency-lock promotion)
+    and the next brief: render analysis.chart_spec via ECharts in the chat
+    UI, defensively handling chart_spec's unfixed schema rather than
+    tightening it now -- schema-tightening deferred to a separate future
+    slice by this session's explicit decision.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ HANDOFF.md | 427 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------------------------------------------
+ 1 file changed, 228 insertions(+), 199 deletions(-)
+```
+
+## Commit at 2026-08-06 01:07
+```
+commit ac7791ab5c319d7eea34c0c24b1930c09cee4b3b
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 01:07:00 2026 +0530
+
+    Render analysis.chart_spec as an ECharts bar chart in the chat UI
+    
+    ChartView resolves chart_type/type and x/x_field, y/y_field against the
+    real (schema-less) chart_spec shapes observed in production, rendering
+    nothing for anything that doesn't resolve to a recognized bar chart.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ artifacts/design/2026-08-06-chart-view.md  |  78 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-06-chart-view.md | 150 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-chart-view.md      |  88 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/package-lock.json                      |  53 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/package.json                           |   2 ++
+ web/src/App.tsx                            |  10 ++++++++++
+ web/src/api.ts                             |  32 ++++++++++++++++++++++++++++++++
+ web/src/components/ChartView.tsx           |  94 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 8 files changed, 507 insertions(+)
+```
+
+## Commit at 2026-08-06 01:07
+```
+commit add6707a12fc6aed39392ac7ac4567f122532b0d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 01:07:54 2026 +0530
+
+    Capture: chart-view slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ plans/logs/2026-08-06-chart-view.md | 85 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 85 insertions(+)
+```
+
+## Commit at 2026-08-06 01:16
+```
+commit 0595cb49caa19d4bc5b7d1570b84225a644397d7
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 01:16:01 2026 +0530
+
+    Handoff: chart-view slice done, next brief is SQL/explanation viewer
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ HANDOFF.md | 436 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-------------------------------------------------------------------------------------------------------------
+ 1 file changed, 185 insertions(+), 251 deletions(-)
+```
+
+## Commit at 2026-08-06 01:47
+```
+commit 865d30dbfb601bd7bee140d0a2535f2f4aa1eccc
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 01:47:29 2026 +0530
+
+    Render SQL and explanation in a collapsed View SQL section per message
+    
+    Extends asAssistantContent() to expose sql/analysis.explanation
+    alongside rows/chartSpec, and adds SqlDetails.tsx (a <details> element,
+    collapsed by default) rendered via AssistantResult in App.tsx's message
+    loop.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ artifacts/design/2026-08-06-sql-explanation-viewer.md  |  57 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ artifacts/reviews/2026-08-06-sql-explanation-viewer.md | 165 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-sql-explanation-viewer.md      |  61 ++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/src/App.tsx                                        |  12 ++++++++---
+ web/src/api.ts                                         |  10 ++++++++-
+ web/src/components/SqlDetails.tsx                      |  19 +++++++++++++++++
+ web/tests/SqlDetails.test.tsx                          | 126 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/tests/api.asAssistantContent.test.ts               | 111 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 8 files changed, 557 insertions(+), 4 deletions(-)
+```
+
+## Commit at 2026-08-06 01:50
+```
+commit 767e0d1ffa427b9929b8c90becd2e964d582db52
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 01:50:34 2026 +0530
+
+    Capture: sql-explanation-viewer slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ plans/logs/2026-08-06-sql-explanation-viewer.md | 68 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 68 insertions(+)
+```
+
+## Commit at 2026-08-06 01:50
+```
+commit 613c1b02aed0aea0aaee074a7eb6d0c16d83ec2b
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 01:50:42 2026 +0530
+
+    Handoff: sql-explanation-viewer slice done, next brief is follow-up chips
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ HANDOFF.md | 285 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------------------------------------------------------------
+ 1 file changed, 125 insertions(+), 160 deletions(-)
+```
+
+## Commit at 2026-08-06 08:36
+```
+commit 1ba4dc03b7ea15348e655b4a235db468c1826b5d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 08:36:58 2026 +0530
+
+    Render analysis.follow_ups as clickable chips beneath each message
+    
+    Clicking a chip populates the compose input with its text without
+    submitting, reusing ConversationDetailView's existing question state.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ artifacts/reviews/2026-08-06-follow-up-chips.md | 126 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-follow-up-chips.md      |  63 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/src/App.tsx                                 |  14 ++++++++++++--
+ web/src/api.ts                                  |   8 ++++++--
+ web/src/components/FollowUpChips.tsx            |  23 +++++++++++++++++++++++
+ web/tests/FollowUpChips.test.tsx                | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/tests/api.asAssistantContent.test.ts        |  85 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 450 insertions(+), 4 deletions(-)
+```
+
+## Commit at 2026-08-06 08:39
+```
+commit 05db965a613184596333159467d7e61edb1f64ae
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 08:39:14 2026 +0530
+
+    Capture: follow-up-chips slice log
+    
+    Promotes the recurring stale-consumer-list comment pattern into
+    templates/no-slop.md after it was caught for the second time.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ plans/logs/2026-08-06-follow-up-chips.md | 76 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ templates/no-slop.md                     |  9 +++++++++
+ 2 files changed, 85 insertions(+)
+```
+
+## Commit at 2026-08-06 12:12
+```
+commit c6e267d6ea04df468d7e7d5ada61ea950eca6f6e
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 12:12:08 2026 +0530
+
+    Add dashboards/dashboard_cards schema, ORM models, and seeded Overview row
+    
+    Migration + models only, per M6's first slice (mirrors M4's
+    app-schema-persistence precedent) -- pin/grid/endpoint wiring is next.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ alembic/versions/ee5ee826b050_create_dashboards_dashboard_cards.py |  70 ++++++++++++++++++++++++++++++++++++++++++
+ app/db/models.py                                                   |  25 +++++++++++++++
+ artifacts/reviews/2026-08-06-dashboard-persistence.md              | 107 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-dashboard-persistence.md                   |  76 +++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_app_db.py                                               | 226 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++--
+ 5 files changed, 502 insertions(+), 2 deletions(-)
+```
+
+## Commit at 2026-08-06 12:13
+```
+commit 62b413cc3918c36745d9701f88c1cea66cf11d27
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 12:13:01 2026 +0530
+
+    Capture: dashboard-persistence slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ plans/logs/2026-08-06-dashboard-persistence.md | 62 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 62 insertions(+)
+```
+
+## Commit at 2026-08-06 12:48
+```
+commit 089c0d457f1001bcbfd2fc3e4b258e0365b9b261
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 12:48:25 2026 +0530
+
+    Add POST /api/dashboards/{id}/cards to pin a card onto a dashboard
+    
+    Creates one DashboardCard row under an existing dashboard and returns
+    it, or 404s with zero writes for an unknown dashboard id -- mirroring
+    create_conversation's insert-flush-commit-return shape and
+    post_conversation_message's existence-check-then-404 shape. No SQL
+    execution or sqlglot validation at pin time; sql_text/chart_spec_json
+    are stored opaquely, per the brief.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ app/main.py                                                 |  60 +++++++++++++++++++++++++++-
+ artifacts/reviews/2026-08-06-pin-dashboard-card-endpoint.md |  99 ++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-pin-dashboard-card-endpoint.md      |  77 ++++++++++++++++++++++++++++++++++++
+ tests/test_api_dashboard_cards.py                           | 304 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 539 insertions(+), 1 deletion(-)
+```
+
+## Commit at 2026-08-06 13:22
+```
+commit 5780d7c373f734e562daf793a0529b96d1f95f35
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 13:22:42 2026 +0530
+
+    Capture: pin-dashboard-card-endpoint slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ plans/logs/2026-08-06-pin-dashboard-card-endpoint.md | 80 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 80 insertions(+)
+```
+
+## Commit at 2026-08-06 13:35
+```
+commit 14f148ff74ceed3ae085ed691a8f388c7a8cc39b
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 13:35:26 2026 +0530
+
+    Handoff: pin-dashboard-card-endpoint slice done, next brief is dashboard fresh-on-view GET
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01U9j6Ddnyucf9TbHmkQZbfU
+
+ HANDOFF.md | 296 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++---------------------------------------------------------------------------------------
+ 1 file changed, 161 insertions(+), 135 deletions(-)
+```
+
+## Commit at 2026-08-06 18:58
+```
+commit 8da3f8c104cfefb17d1f7eab84d37dace554aa76
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 18:58:22 2026 +0530
+
+    Add GET /api/dashboards/{id} with fresh-on-view card re-execution
+    
+    Re-validates and re-executes every pinned card's persisted sql_text on
+    every request (reusing answer.py's _validate_and_execute, no repair
+    loop, no LLM call), returning cards ordered by position with fresh
+    rows attached. 404s on an unknown dashboard id; 502s the whole request
+    if any card's SQL now fails validation/execution, per PRD F6/Sec.8.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ app/main.py                                                 |  63 ++++++++++++++++++++-
+ artifacts/reviews/2026-08-06-dashboard-fresh-on-view-get.md | 103 ++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-dashboard-fresh-on-view-get.md      |  96 +++++++++++++++++++++++++++++++
+ templates/no-slop.md                                        |  14 +++++
+ tests/test_api_dashboard_cards.py                           | 435 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 710 insertions(+), 1 deletion(-)
+```
+
+## Commit at 2026-08-06 18:59
+```
+commit c94c5c9c1a37799bb092b390fd32c5dfc938e4a0
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 18:59:12 2026 +0530
+
+    Capture: dashboard-fresh-on-view-get slice log
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ plans/logs/2026-08-06-dashboard-fresh-on-view-get.md | 74 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 74 insertions(+)
+```
+
+## Commit at 2026-08-06 19:01
+```
+commit 96c1d8c0f4c032a89133c8f2340ed640fcdc55b8
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 19:01:07 2026 +0530
+
+    Handoff: dashboard-fresh-on-view-get slice done, next brief is PATCH /api/cards/{id}
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ HANDOFF.md | 280 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------
+ 1 file changed, 159 insertions(+), 121 deletions(-)
+```
+
+## Commit at 2026-08-06 23:31
+```
+commit 69671fff523def9c00356579c2b8fdaad6ab02dc
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Thu Aug 6 23:31:16 2026 +0530
+
+    Add PATCH /api/cards/{id} for card rename/reposition
+    
+    Per PRD.md Â§8's card-actions endpoint: partially updates a pinned
+    DashboardCard's title and/or position, leaving omitted fields
+    unchanged; sql_text/question_text/chart_spec_json/dashboard_id stay
+    immutable. 404s on unknown card id.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ app/main.py                                                   |  38 +++++++++
+ artifacts/reviews/2026-08-06-patch-dashboard-card-endpoint.md | 128 ++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-06-patch-dashboard-card-endpoint.md      |  71 +++++++++++++++++
+ tests/test_api_dashboard_cards.py                             | 601 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 4 files changed, 837 insertions(+), 1 deletion(-)
+```
+
+## Commit at 2026-08-07 00:00
+```
+commit ea5443a3c7010b23c6db0ff6727f403640c684cf
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 00:00:35 2026 +0530
+
+    Capture: patch-dashboard-card-endpoint slice log
+    
+    Handoff: patch-dashboard-card-endpoint slice done, next brief is DELETE /api/cards/{id}
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ HANDOFF.md                                             | 270 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------------
+ plans/logs/2026-08-06-patch-dashboard-card-endpoint.md |  79 +++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 186 insertions(+), 163 deletions(-)
+```
+
+## Commit at 2026-08-07 11:29
+```
+commit 2097aa56e42545e42768030499f4bf9da2f4e5dd
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 11:29:53 2026 +0530
+
+    Add DELETE /api/cards/{id} for pinned card removal
+    
+    Deletes exactly one DashboardCard row by id (204, no body) or 404s with
+    "card not found" if it doesn't exist; parent Dashboard row and sibling
+    cards are never touched.
+
+ app/main.py                                                    |  14 ++++++++
+ artifacts/reviews/2026-08-07-delete-dashboard-card-endpoint.md | 103 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-delete-dashboard-card-endpoint.md      |  63 ++++++++++++++++++++++++++++++++++++
+ tests/test_api_dashboard_cards.py                              | 241 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 421 insertions(+)
+```
+
+## Commit at 2026-08-07 11:31
+```
+commit e3a93fcb313b4166d6289d7ce34512182aa6013d
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 11:31:34 2026 +0530
+
+    Capture: delete-dashboard-card-endpoint slice log
+    
+    Handoff: delete-dashboard-card-endpoint slice done, next brief is POST /api/cards/{id}/run
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ HANDOFF.md                                              | 219 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------
+ plans/logs/2026-08-07-delete-dashboard-card-endpoint.md |  71 +++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 184 insertions(+), 106 deletions(-)
+```
+
+## Commit at 2026-08-07 14:50
+```
+commit 0a025a07964468819c518fe0ee3f88b2c82adc44
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 14:50:05 2026 +0530
+
+    Add POST /api/cards/{id}/run for pinned card re-execution
+    
+    Per PRD.md Â§8's card-actions endpoint: re-validates and re-executes
+    exactly one pinned DashboardCard's stored sql_text and returns fresh
+    rows, reusing get_dashboard's per-card _validate_and_execute pattern
+    narrowed to a single card. 404s on unknown card id with zero
+    validation/execution attempted; 502 on validation/execution failure,
+    matching get_dashboard's upstream-pipeline-failure convention.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ app/main.py                                                 |  31 +++++++++++++++++
+ artifacts/reviews/2026-08-07-run-dashboard-card-endpoint.md | 119 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-run-dashboard-card-endpoint.md      |  81 ++++++++++++++++++++++++++++++++++++++++++++
+ tests/test_api_dashboard_cards.py                           | 260 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 491 insertions(+)
+```
+
+## Commit at 2026-08-07 16:02
+```
+commit 6f04d3790db96f6364ea2ae9b9fd5c7d234797ac
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Fri Aug 7 16:02:39 2026 +0530
+
+    Add read-only Dashboard view to the React app
+    
+    Adds fetchDashboard() + DashboardDetail/DashboardCardWithRows types to
+    api.ts, a new DashboardView component reusing ChartView unchanged, and
+    a Conversations/Dashboard nav toggle in App.tsx wired to dashboard id 1.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+
+ artifacts/reviews/2026-08-07-dashboard-view-frontend.md | 103 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-07-dashboard-view-frontend.md      |  72 ++++++++++++++++++++++++++++++++++++++++
+ web/src/App.tsx                                         |  74 +++++++++++++++++++++++++++++------------
+ web/src/api.ts                                          |  31 ++++++++++++++++++
+ web/src/components/DashboardView.tsx                    |  36 ++++++++++++++++++++
+ web/tests/DashboardView.test.tsx                        | 262 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/tests/api.fetchDashboard.test.ts                    |  96 +++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 7 files changed, 653 insertions(+), 21 deletions(-)
+```
