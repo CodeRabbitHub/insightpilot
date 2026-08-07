@@ -67,6 +67,13 @@ export async function fetchDashboard(id: number): Promise<DashboardDetail> {
   return response.json()
 }
 
+export async function deleteCard(id: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/cards/${id}`, { method: 'DELETE' })
+  if (!response.ok) {
+    throw new Error(`DELETE /api/cards/${id} failed: ${response.status}`)
+  }
+}
+
 export interface Analysis {
   summary: string
   explanation: string
