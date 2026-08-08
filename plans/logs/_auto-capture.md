@@ -2515,3 +2515,44 @@ Date:   Sat Aug 8 12:50:15 2026 +0530
  web/tests/App.test.tsx                                     | 245 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  5 files changed, 524 insertions(+), 3 deletions(-)
 ```
+
+## Commit at 2026-08-08 12:51
+```
+commit df51337d9894b9191e467fa80aea97586789d0c5
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 12:51:16 2026 +0530
+
+    Guard App.tsx's conversations-list fetch against StrictMode's stale double-invoke
+    
+    Same bug class just fixed in DashboardView.tsx (commit b0ab678), ported to
+    the sibling race the prior slice's handoff flagged as diagnosed-but-deferred:
+    the conversations-list mount effect now uses a local `stale` flag, checked
+    before setConversations/setError/setLoading in .then/.catch/.finally and
+    flipped in cleanup -- mirroring, exactly, the pattern this same file's
+    conversation-detail effect (lines 173-194) already uses. Only that one
+    effect changed; the detail effect, ConversationList, ConversationDetailView,
+    message-sending, and view-switching are untouched.
+    
+    New web/tests/App.test.tsx (test-writer subagent, from the brief alone)
+    drives the actual bug via a real <StrictMode> wrapper (matching
+    web/src/main.tsx's production wrapping exactly) rather than a proxy trick,
+    since this effect's `[]` deps give no prop to swap the way DashboardView's
+    tests did. Same standing gap as every other frontend test here: written
+    correctly, cannot execute yet (no vitest/jsdom wired into web/package.json).
+    
+    Two no-slop passes, zero unresolved findings at gate time (record:
+    artifacts/reviews/2026-08-08-app-strictmode-fetch-guard.md). Shipping proof:
+    Playwright route interception against the real dev servers reproduced the
+    bug pre-fix (stale response clobbers the fresh one) and confirmed the fix
+    post-fix and after restoring it, zero console errors throughout.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-08-app-strictmode-fetch-guard.md | 135 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-08-app-strictmode-fetch-guard.md      | 111 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                                |  44 ++++++++++++++++++++++++++
+ web/src/App.tsx                                            |  16 ++++++++--
+ web/tests/App.test.tsx                                     | 245 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 548 insertions(+), 3 deletions(-)
+```

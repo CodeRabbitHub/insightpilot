@@ -97,6 +97,15 @@ Dead code is a lie about what the program does. Delete it.
       naming `ChartView and SqlDetails`; 2026-08-06 follow-up-chips' gate
       caught it stale again the very next slice and generalized it to "any
       per-message assistant component")
+- [ ] A test file's header comment describes current behavior and scope,
+      never the session's TDD sequencing ("written BEFORE the fix
+      lands...") — that claim is already false by the time the diff lands,
+      since the same commit that adds the test typically adds the fix too
+      (caught twice, same subagent both times: 2026-08-08
+      dashboard-strictmode-fetch-guard's gate reworded
+      `DashboardView.test.tsx`'s header to present tense; 2026-08-08
+      app-strictmode-fetch-guard's gate caught the identical phrasing the
+      very next slice in the new `App.test.tsx`)
 
 ## 7. Consistency with the codebase
 
