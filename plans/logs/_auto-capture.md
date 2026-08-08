@@ -2556,3 +2556,29 @@ Date:   Sat Aug 8 12:51:16 2026 +0530
  web/tests/App.test.tsx                                     | 245 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  5 files changed, 548 insertions(+), 3 deletions(-)
 ```
+
+## Commit at 2026-08-08 13:00
+```
+commit a6ecc45a02cd2af583a58cbb7fee21dd91b1acb2
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 13:00:00 2026 +0530
+
+    Capture: app-strictmode-fetch-guard slice log; promote stale TDD-comment fix
+    
+    Slice log for commit df51337. Promotes a 2nd-repetition pattern per
+    direct sign-off: the test-writer subagent shipped an identical stale
+    TDD-narration header comment two slices in a row (DashboardView.test.tsx,
+    then App.test.tsx), caught both times by no-slop review. templates/no-slop.md
+    gains a checklist line naming the pattern; .claude/agents/test-writer.md
+    gains a direct rule to write headers in present tense, addressing the
+    subagent's own habit rather than just the catch.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ .claude/agents/test-writer.md                       | 10 +++++++++-
+ plans/logs/2026-08-08-app-strictmode-fetch-guard.md | 97 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                         | 41 +++++++++++++++++++++++++++++++++++++++++
+ templates/no-slop.md                                |  9 +++++++++
+ 4 files changed, 156 insertions(+), 1 deletion(-)
+```
