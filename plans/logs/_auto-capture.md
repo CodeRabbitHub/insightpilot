@@ -2680,3 +2680,24 @@ Date:   Sat Aug 8 15:40:51 2026 +0530
  web/tests/setup.ts                                        | 100 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  4 files changed, 373 insertions(+), 12 deletions(-)
 ```
+
+## Commit at 2026-08-08 15:46
+```
+commit e458a96d6605ed5def8f6151513aaf7e15e45872
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 15:46:09 2026 +0530
+
+    Capture: dashboardview-canvas-stub slice log
+    
+    Slice log for commit 573308f. Records the two mid-build discoveries (missing
+    errorMessage mock export, dragCardOnto's batched act() call) and the reverted
+    registerPreprocessor speed experiment; sets the next brief: cut
+    DashboardView.test.tsx's new ~63s runtime without reintroducing raciness.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ plans/logs/2026-08-08-dashboardview-canvas-stub.md | 80 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                        | 47 +++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 127 insertions(+)
+```

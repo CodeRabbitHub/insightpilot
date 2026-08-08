@@ -1,112 +1,106 @@
 # Handoff
 
 Date: 2026-08-08
-Slice just completed: plans/briefs/2026-08-08-app-strictmode-fetch-guard.md
-  + plans/logs/2026-08-08-app-strictmode-fetch-guard.md
-  (commit df51337, capture a6ecc45)
+Slice just completed: plans/briefs/2026-08-08-dashboardview-canvas-stub.md
+  + plans/logs/2026-08-08-dashboardview-canvas-stub.md
+  (commit 573308f, gate record artifacts/reviews/2026-08-08-dashboardview-canvas-stub.md)
 
 ## State of the work
 
-- **`web/src/App.tsx`'s conversations-list mount `useEffect` now guards
-  against React 18 StrictMode's dev-only double-invoke**, the same fix
-  shape as `DashboardView.tsx`'s prior slice: a local `stale` boolean
-  (`false` at the start of each invocation), checked before each of
-  `setConversations`/`setError`/`setLoading` in
-  `.then`/`.catch`/`.finally`, flipped `true` in the effect's returned
-  cleanup. This mirrors, exactly, this same file's own conversation-detail
-  effect (lines 173-194) — now the third instance of this pattern in the
-  codebase, all three verified independently.
-- **No other part of `App.tsx` touched** — the conversation-detail
-  effect, `ConversationList`, `ConversationDetailView`, message-sending,
-  and view-switching are unrelated to this race and confirmed untouched
-  via `git diff`.
-- **New `web/tests/App.test.tsx`** (test-writer subagent, from the brief
-  alone), still cannot execute (same standing gap, no vitest/jsdom wired
-  into `web/package.json` yet — see this handoff's next brief). Proves,
-  via a real `<StrictMode>` wrapper rendered directly in the test
-  (matching `web/src/main.tsx`'s actual production wrapping, rather than
-  a prop-swap proxy — this effect's `[]` deps give no prop to force a
-  second invocation the way `DashboardView`'s `dashboardId` did): (1) a
-  stale resolution landing after the double-invoke's cleaned-up first run
-  doesn't render; (2) a stale rejection landing after cleanup doesn't
-  surface as an error; (3) a stale resolution landing *before* the fresh
-  one settles, while the fresh call is still pending, doesn't
-  prematurely clear loading or render stale data. Plus two regression
-  cases proving the normal (non-StrictMode) single-invocation path is
-  unaffected.
-- **No-slop review, two passes** (record:
-  `artifacts/reviews/2026-08-08-app-strictmode-fetch-guard.md`). Pass 1
-  found and fixed: a stale TDD-narration header comment in
-  `App.test.tsx` ("written before the fix lands...") — the identical
-  defect the immediately-prior slice's own review had caught on the
-  sibling `DashboardView.test.tsx`, one commit later, same test-writer
-  subagent; and an unexplained defensive mock
-  (`fetchConversation`/`postConversationMessage` stubbed but never
-  exercised) — fixed with a one-line justification. Pass 2 (fresh,
-  against the final diff) confirmed both fixes landed and found nothing
-  new. Zero unresolved findings at gate time.
-- **Ratchet promotion, by direct sign-off**: the repeated stale-TDD-comment
-  defect (2nd occurrence, same subagent) is now a checklist line in
-  `templates/no-slop.md` (category 6) AND a direct rule in
-  `.claude/agents/test-writer.md` (its own rule #5: write headers in
-  present tense, not session TDD-sequencing) — addressing the subagent's
-  own habit, not just the catch.
-- **Shipping proof, real dev servers + Playwright**: route-intercepted
-  `GET /api/conversations` so the first (StrictMode-stale) response
-  resolves 2.5s after the second (fresh) response, with distinguishable
-  marker payloads. Fixed code: fresh marker shows and survives the late
-  stale resolution, zero console errors. Pre-fix repro (`git stash` of
-  just the guard): fresh marker gets clobbered by the late stale
-  response — bug reproduced for real. Re-confirmed fixed after
-  `git stash pop`.
-- **A git housekeeping correction happened mid-session**: an early commit
-  attempt accidentally bundled this slice's changes into a commit meant
-  only for a leftover `plans/logs/_auto-capture.md` entry from the prior
-  slice's handoff. Caught before anything was pushed; fixed via
-  `git reset --soft HEAD~1` (non-destructive — nothing lost, only the
-  commit boundary moved) and re-committed as one accurate commit
-  (`df51337`).
-- **No backend, schema, or dependency changes.**
+- **`web/tests/DashboardView.test.tsx` passes for real, in full — all 149 tests
+  across all 10 files pass.** The DashboardView-specific failures that every prior
+  handoff carried forward as an open, accepted-out-of-scope gap are now resolved.
+- **Two genuine root causes were fixed in `web/tests/setup.ts`**, not one:
+  1. jsdom's `HTMLCanvasElement.getContext('2d')` returns `null` without the native
+     `canvas` package (still deliberately not added). A stub now returns a
+     per-canvas-cached (via `WeakMap`) plain object implementing every canvas 2D
+     method reachable from `zrender`/`echarts` source — verified by grepping
+     `node_modules/{zrender,echarts}/lib` directly (two rounds of independent
+     no-slop review each found one real gap in that list — `arcTo`/`scale` via
+     differently-named context variables, then `draw` — both now covered).
+  2. Independently of context nullness: `zrender` captures `window.requestAnimationFrame`
+     once at its own module-load time and drives its entire render/animation loop
+     through it. jsdom's rAF is a real ~16ms wall-clock timer, so a chart's first
+     `<canvas>` only appeared after real time passed — genuinely racing against a
+     test's synchronous `act()` calls. Confirmed by direct reproduction this
+     session (not assumed). Fixed by patching `globalThis.requestAnimationFrame` to
+     resolve via `queueMicrotask`, set in `setup.ts` specifically because it must
+     run before any module transitively imports `zrender` (a patch applied later,
+     e.g. inside a test body, has no effect on the reference `zrender` already
+     captured — confirmed the hard way, via a self-inflicted repeat of this exact
+     bug mid-session when an experiment added a static `import` of `echarts` to
+     `setup.ts`, which hoists above the patch statement).
+- **Two pre-existing test-fixture defects in `DashboardView.test.tsx` were also
+  fixed**, both masked by the canvas crash until it stopped happening, both
+  confirmed by isolated reproduction and explicitly approved before being applied:
+  1. `vi.mock('../src/api', ...)` never stubbed the real `errorMessage` export that
+     `DashboardView.tsx` imports and calls in five rejection handlers — present
+     since the component's first commit, invisible until execution could reach
+     those catch blocks. Fixed by switching the mock factory to spread
+     `importOriginal()` and override only the five functions that need mocking.
+  2. `dragCardOnto` dispatched `dragstart`/`dragover`/`drop` inside one shared
+     `act()` block. React 18 batches the `setDraggedCardId` state update from
+     `dragstart` within that block, so `onDrop`'s `handleDrop` read a stale
+     (`null`) `draggedCardId` and never called `repositionCard` — a test-timing
+     bug, not a `DashboardView.tsx` bug (real browser drags fire these as separate
+     event-loop ticks). Fixed by giving each event its own `act()` call, then
+     deduping the three into a small `actDispatchDragEvent` helper at gate-time
+     no-slop's request.
+- **No `web/src/**` changes, no new dependency, no `@testing-library`.** Diff
+  confined to `web/tests/setup.ts` (+100) and `web/tests/DashboardView.test.tsx`
+  (+44/-12), plus this slice's own brief/log/gate-record files.
+- **Two independent no-slop passes, all findings fixed** (record:
+  `artifacts/reviews/2026-08-08-dashboardview-canvas-stub.md`). Nothing carried as
+  an unresolved exception.
+- **New, accepted trade-off: `cd web && npm test` now takes ~63s, up from the
+  pre-slice ~2.6s.** Canvas-rendering tests now actually run echarts' default
+  ~1000ms entrance-animation frame loop to completion (via the rAF-as-microtask
+  patch) instead of crashing or never reaching that code. An
+  `echarts.registerPreprocessor((option) => { option.animation = false })`
+  experiment was tried mid-session to eliminate this and gave no measurable
+  improvement even after fixing its own import-ordering bug — reverted, not in the
+  final diff. This is now the seed of the next slice below.
+- Production build (`npm run build`) and a real `vite` dev server (started,
+  confirmed `HTTP_STATUS:200`, then stopped) both verified unaffected — expected,
+  since no `web/src/**` file changed, but confirmed rather than assumed.
 
 ## Proof
 
+Full-directory run (brief's literal done-check command), run fresh at gate time:
 ```
-$ cd web && npm run build
-> web@0.0.0 build
-> tsc -b && vite build
+$ cd web && npm test
 
-vite v8.2.0 building client environment for production...
+> web@0.0.0 test
+> vitest run
+
+ RUN  v4.1.10 C:/Users/AmanRoland/Downloads/insightpilot/web
+
+ Test Files  10 passed (10)
+      Tests  149 passed (149)
+   Start at  15:36:11
+   Duration  63.42s (transform 1.33s, setup 453ms, import 2.47s, tests 61.44s, environment 13.43s)
+$ echo $?
+0
+```
+
+Production build:
+```
+$ npm run build
 ✓ 628 modules transformed.
-✓ built in 965ms
+✓ built in 7.01s
 ```
 
-Shipping proof (Playwright, scratchpad-installed `pw-drag/`, reused across
-sessions; real `vite`/`uvicorn` dev servers reused from prior sessions):
-
-Fixed code:
-```json
-{
-  "callCount": 2,
-  "freshMarkerShownEarly": true,
-  "staleMarkerShownEarly": false,
-  "freshMarkerAfterWait": true,
-  "staleMarkerAfterWait": false,
-  "consoleErrors": []
-}
+Real dev server (shipping proof, since no `src/**` changed):
 ```
-Pre-fix repro (`git stash push -- web/src/App.tsx`):
-```json
-{
-  "callCount": 2,
-  "freshMarkerShownEarly": true,
-  "staleMarkerShownEarly": false,
-  "freshMarkerAfterWait": false,
-  "staleMarkerAfterWait": true,
-  "consoleErrors": []
-}
+$ npm run dev -- --port 5183
+VITE v8.2.0  ready in 591 ms
+➜  Local:   http://localhost:5183/
+$ curl -s -o /dev/null -w "HTTP_STATUS:%{http_code}\n" http://localhost:5183/
+HTTP_STATUS:200
 ```
-Post-restore (`git stash pop`) re-run matched the "Fixed code" result
-above exactly.
+(Verified stopped afterward — the first `kill` attempt during the session silently
+failed to actually terminate the background process; caught and fixed by checking
+port 5183 again before writing this handoff, rather than assuming the kill worked.)
 
 ## Open questions / known issues
 
@@ -131,27 +125,29 @@ above exactly.
     unaddressed.
   - A `response.content[0].text`/`ThinkingBlock` bug pattern is fixed
     only in `analyze_answer.py`; `generate_sql.py`, `repair_sql.py`,
-    `describe.py` still carry the same fragile assumption.
+    `describe.py` still carry the same fragile assumption. (Considered as
+    this slice's follow-on and explicitly deferred in favor of the test-suite
+    speed slice below — still open, still worth picking up soon.)
   - The project's own `.venv` (Python 3.11.15) must be used explicitly
     for backend commands.
   - API base URL is a hardcoded `http://localhost:8000` constant in
     `web/src/api.ts`.
-  - `Conversation`'s `user_id` FK to `users` is deliberately omitted —
+  - `Conversation`'s `user_id` FK to `users` is deliberately omitted --
     `users` doesn't exist yet (F8).
   - `queries` table (PRD §7's fourth `app`-schema table) still doesn't
-    exist — not needed until the pipeline-logging slice.
+    exist -- not needed until the pipeline-logging slice.
   - Docker Desktop's daemon does not auto-start with this
-    machine/session — if a session's done-check fails with a Postgres
+    machine/session -- if a session's done-check fails with a Postgres
     connection refusal on port 5433, start Docker Desktop and run
     `docker compose up -d` before assuming a code regression.
   - The dev Postgres `dashboards`/`dashboard_cards` tables have
     accumulated leftover proof/test cards from prior sessions' real-
     server shipping proofs (harmless; still worth a cleanup pass
     eventually).
-  - A `uvicorn` dev server (port 8000) and a `vite` dev server (port
-    5173), both left running from prior sessions, are still up and were
-    reused again this session for the shipping proof rather than
-    restarted.
+  - A `uvicorn` dev server (port 8000) may still be up from earlier
+    sessions (not touched this slice). This slice's own `vite` dev server
+    (port 5183) was explicitly started and stopped for shipping proof --
+    confirmed actually stopped before this handoff was written, not assumed.
   - `plans/logs/2026-08-07-run-dashboard-card-endpoint.md` still sits
     untracked in the working tree (a leftover from a session several
     slices back whose capture commit was apparently skipped). Still out
@@ -160,117 +156,96 @@ above exactly.
   - `get_dashboard`'s `ORDER BY DashboardCard.position` (`app/main.py:380`)
     still has no secondary sort key. Still just an observation, not
     fixed.
-  - Playwright (transient, per this project's established pattern for
-    real-browser proofs) cannot be resolved via `npx -p playwright node
-    script.mjs`; the scratchpad install (`pw-drag/`, under a prior
-    session's temp directory) continues to be reused directly and
-    continues to persist usably across sessions.
   - The DB-drift-on-partial-`repositionCard`-failure tradeoff from the
     drag-reposition slice remains an accepted, documented known
-    limitation — not tracked as a bug to fix.
-  - **Frontend unit tests still cannot execute — this is now this
-    handoff's own next brief, not an open-ended gap**: `vitest`/jsdom are
-    not yet wired into `web/package.json`. Four test files
-    (`SqlDetails.test.tsx`, `FollowUpChips.test.tsx`,
-    `DashboardView.test.tsx`, `App.test.tsx`) have all been written
-    correctly across multiple slices but never executed once — the
-    ratchet's 2nd-repetition threshold was exceeded twice over, and the
-    user has now explicitly said yes to the new dependency this requires.
+    limitation -- not tracked as a bug to fix.
+  - ESLint tooling remains unaddressed (separate from the now-resolved
+    frontend-test-runner gap).
+  - A stray `web/.claude/.last_verified_signature` file is untracked
+    again this session (hook-generated state; root `.gitignore`'s
+    pattern doesn't match nested paths). This is now the **second**
+    consecutive handoff to note it -- ratchet-eligible (a one-line
+    `.gitignore` addition, e.g. `**/.claude/.last_verified_signature`),
+    but still not fixed, since it was out of scope for this slice too.
+    Next session that touches `.gitignore` or notices it a third time
+    should just fix it.
 - New this slice:
-  - A git-history correction (soft-reset + re-commit, see State of the
-    work above) happened mid-session — worth remembering that gate-time
-    `git add` staging can silently persist across an unrelated commit if
-    not cleared, so re-check `git status --porcelain` immediately before
-    every commit, not just before starting the gate.
-  - `DashboardView.test.tsx`'s own drag-to-reposition tests (not touched
-    this slice, but read as precedent) note jsdom's `DragEvent`/
-    `DataTransfer` support is unreliable and work around it with a plain
-    `Event` + manually-attached `dataTransfer` property. Worth expecting
-    similar jsdom friction, and possibly canvas-related friction from
-    `echarts-for-react`, when `DashboardView.test.tsx` is actually run
-    for the first time under the next slice's new test runner — this is
-    exactly why that slice's Out-of-scope defers `DashboardView.test.tsx`
-    and `App.test.tsx` execution to a follow-on slice rather than betting
-    all four files pass cleanly on the first real run.
+  - **The `~63s` `DashboardView.test.tsx` suite runtime is the new open item** --
+    see State of the work above for the root cause (real animation-frame-loop
+    work, now compressed onto microtasks instead of crashing) and the failed
+    `registerPreprocessor` attempt. This is the seed of the next slice below.
 
 ## Next slice (the brief, written NOW while context is hot)
 
 Goal:
-Wire `vitest` + a jsdom test environment into `web/package.json` as new
-devDependencies (explicit user sign-off already given this session) and
-get the two simplest existing frontend test files — `SqlDetails.test.tsx`
-and `FollowUpChips.test.tsx` — executing and passing for real, as the
-project's first actual frontend test run.
+Reduce `web/tests/DashboardView.test.tsx`'s ~63s suite runtime (down from a
+pre-canvas-stub ~2.6s) without reintroducing the raciness the canvas-stub slice
+fixed -- every canvas-presence assertion must still pass deterministically.
 
 Constraints:
-- New dependencies are `vitest` and a jsdom environment package (e.g.
-  `jsdom` itself, or `@vitest/environment-jsdom` if vitest's own version
-  requires it) — nothing else. No `@testing-library` or any other test
-  utility library: this project's established house style (all four
-  existing test files) renders via `react-dom/client`'s `createRoot` +
-  `act` from `react-dom/test-utils` directly, and that style must keep
-  working unchanged.
-- Vitest gets a jsdom environment via either `vite.config.ts`'s `test`
-  block or a new `vitest.config.ts` — implementer's choice, but only one
-  of the two, not both.
-- A real `npm test` (or equivalently-named) script must exist in
-  `web/package.json` and actually invoke vitest against the whole
-  `web/tests/` directory.
-- Do not modify `SqlDetails.test.tsx`'s or `FollowUpChips.test.tsx`'s
-  assertions to make them pass. If a real bug in the component surfaces,
-  fix the component; if a test itself turns out to have a genuine defect
-  (not just "inconvenient to satisfy"), flag it to the user rather than
-  silently loosening it, per CLAUDE.md's standing rule.
-- `web/tsconfig.app.json`'s `"include": ["src"]` (which currently excludes
-  `web/tests/*.test.tsx` from `tsc -b`'s production type-check) may need a
-  companion tsconfig for tests, or vitest's own separate type-checking —
-  don't fold test files into the production build's type-check scope
-  without flagging that as a deliberate Constraint decision at Gate 1.
+- No new npm dependency (same standing constraint as the canvas-stub slice --
+  specifically not the native `canvas` package).
+- Do not modify `DashboardView.test.tsx`'s assertions, and do not reintroduce
+  ChartView/echarts-for-react mocking -- the real `<canvas>` DOM node must remain
+  genuine, unmocked proof of per-card chart invocation, per this file's own
+  long-standing design (unchanged by the prior slice).
+- No `web/src/**` changes -- `ChartView.tsx`/`DashboardView.tsx` are correct in
+  production; this is a test-environment performance issue only.
+- Whatever mechanism is used must not depend on echarts' internal animation
+  timing being a certain duration (fragile against an echarts/zrender version
+  bump) if avoidable -- prefer disabling/short-circuiting the animation loop
+  itself over trying to speed-run it.
+- Match existing house style in `web/tests/setup.ts` (plain patches/stubs, no new
+  test-utility library).
 
 Inputs:
-- `web/package.json`'s current `devDependencies` (vite, typescript,
-  @vitejs/plugin-react, tailwind toolchain — no test runner yet).
-- `web/tests/SqlDetails.test.tsx` and `web/tests/FollowUpChips.test.tsx`
-  (126 and 135 lines respectively) as the two files this slice must get
-  green — both are simpler than the other two existing test files (no
-  `vi.mock` module factories, no drag events, no canvas-rendering
-  components).
-- `web/tests/DashboardView.test.tsx` and `web/tests/App.test.tsx` exist
-  but are explicitly NOT this slice's responsibility to get passing (see
-  Out-of-scope) — their own header comments already flag jsdom
-  `DragEvent`/`DataTransfer` unreliability and canvas quirks that are
-  likely to need their own dedicated debugging slice(s) once actually run.
+- `web/tests/setup.ts`'s current `requestAnimationFrame`-as-microtask patch
+  (`globalThis.requestAnimationFrame = (fn) => { queueMicrotask(() => fn(0)); return 0 }`)
+  -- this is what turns the ~1000ms real-wall-clock entrance animation into a
+  ~1000ms *microtask-driven* animation instead of eliminating it; the frame count
+  is unchanged, only the delay between frames is compressed to ~0.
+  - Note: this patch is load-bearing for correctness (see the prior slice's
+    HANDOFF/log/gate record for why) -- any speed fix must keep it or replace it
+    with something that preserves the same "canvas appears deterministically
+    within a synchronous test's `act()` calls" guarantee, not remove it outright.
+- The already-tried-and-reverted `echarts.registerPreprocessor((option) => {
+  option.animation = false })` experiment (see this slice's log/gate record) --
+  gave no measurable speedup even with correct import ordering, meaning the cost
+  is NOT solely the chart's own data-animation. The temporary `echarts.init()`
+  instance inside `echarts-for-react`'s `initEchartsInstance()`
+  (`node_modules/echarts-for-react/lib/core.js`) creates a SECOND, real init cycle
+  per chart mount before the real one renders -- whatever is driving the ~1s cost
+  likely needs to be traced through that path too, not just the final chart's own
+  `option.animation`.
+- `plans/logs/2026-08-08-dashboardview-canvas-stub.md` and
+  `artifacts/reviews/2026-08-08-dashboardview-canvas-stub.md` for the full prior
+  investigation (rAF capture-at-module-load mechanics, the self-inflicted
+  reintroduction of the bug via a static `import`, the failed
+  `registerPreprocessor` attempt).
 
 Outputs:
-- `web/package.json` with `vitest` + jsdom environment as new
-  devDependencies and a working test script.
-- A vitest config (wherever it lives) configured for the jsdom
-  environment.
-- `SqlDetails.test.tsx` and `FollowUpChips.test.tsx` both passing, for
-  real, with the actual terminal output to prove it.
+- `web/tests/DashboardView.test.tsx`'s full suite runtime measurably reduced from
+  ~63s (target: ideally back near the ~2.6s baseline, but any honest, verified
+  improvement is acceptable to report -- do not claim a number that wasn't
+  actually measured).
+- Every one of the 149 tests still passing, unmodified.
 
 Done-check:
-`cd web && npm test` (or whatever the final script name is) runs to
-completion, exit code 0, with output showing every test in
-`SqlDetails.test.tsx` and `FollowUpChips.test.tsx` passing. Paste the full
-terminal output, not a summary. (`DashboardView.test.tsx`/`App.test.tsx`
-are expected to still run as part of the same `vitest` invocation since
-they live in the same directory — if either fails, that failure must be
-shown too, but fixing it is explicitly out of this slice's scope per
-below; a failing-but-out-of-scope file must be clearly called out as such
-in the done-check output, not silently ignored.)
+`cd web && npm test` runs to completion, exit code 0, with output showing all 149
+tests passing (same set as this slice's proof) AND a `Duration` figure measurably
+lower than ~63s. Paste the full terminal output including the duration line, run
+at least twice to rule out one-off variance.
 
 Out-of-scope:
-- Making `DashboardView.test.tsx` or `App.test.tsx` pass — both have
-  known jsdom-fragility risk (drag events, canvas rendering, real
-  `<StrictMode>` double-invoke timing) flagged in their own comments,
-  and forcing them into this slice risks turning a day-sized dependency-
-  wiring slice into an open-ended debugging one. A follow-on slice, once
-  this one's proven the runner itself works, is the right size for that.
-- `@testing-library` or any other test-utility library beyond vitest +
-  jsdom.
-- CI / GitHub Actions wiring for the new test script — separate slice.
-- ESLint/ruff/mypy tooling — already a separate, unaddressed open
-  question, not this slice's job.
-- Any new test file or new test case beyond what already exists in
-  `SqlDetails.test.tsx`/`FollowUpChips.test.tsx`.
+- Any new npm dependency.
+- Any change to `DashboardView.test.tsx`'s assertions or to `ChartView.tsx`/
+  `DashboardView.tsx`.
+- Mocking `ChartView`/`echarts-for-react` to skip real rendering -- if
+  investigation concludes that's the only way to get meaningful speed, stop and
+  flag that trade-off rather than adopting it silently (same rule as the prior
+  slice).
+- Chasing test-suite speed for `SqlDetails.test.tsx`/`FollowUpChips.test.tsx`/
+  `App.test.tsx`/`api.*.test.ts` -- they're already fast; this is scoped to
+  `DashboardView.test.tsx` specifically.
+- ESLint/ruff/mypy tooling, the `ThinkingBlock` bug pattern, the stray
+  `.gitignore` gap, or any other carried-over open question above.
