@@ -2633,3 +2633,50 @@ Date:   Sat Aug 8 14:12:52 2026 +0530
  web/vitest.config.ts                             |  10 ++
  6 files changed, 1107 insertions(+), 3 deletions(-)
 ```
+
+## Commit at 2026-08-08 14:14
+```
+commit 1e0cad469374d90c123d949ab566a329347490d5
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 14:14:31 2026 +0530
+
+    Capture: web-vitest-jsdom slice log
+    
+    Slice log for commit 7e04895. Records the one fix made mid-gate (silent
+    act() environment warning, closed via tests/setup.ts) and sets the next
+    brief: get DashboardView.test.tsx's canvas-related failures fixed via a
+    getContext stub, no new npm dependency.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ plans/logs/2026-08-08-web-vitest-jsdom.md | 67 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md               | 51 +++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 118 insertions(+)
+```
+
+## Commit at 2026-08-08 15:40
+```
+commit 573308ff1fd93e5a782a7042e765a97e74551b3e
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 15:40:51 2026 +0530
+
+    Stub jsdom's missing 2D canvas context and real-timer rAF so DashboardView.test.tsx passes for real
+    
+    jsdom returns null from getContext('2d') and drives requestAnimationFrame off a
+    real ~16ms timer that zrender captures at module load, so echarts crashed or
+    raced against the test's act() calls before a chart's canvas ever appeared.
+    Also fixes two pre-existing test-fixture bugs the crash had been masking: a
+    vi.mock('../src/api', ...) factory missing the real errorMessage export, and
+    dragCardOnto batching all three drag events into one act() block, which left
+    React 18's onDragStart state update stale by the time onDrop read it.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-08-dashboardview-canvas-stub.md | 168 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-08-dashboardview-canvas-stub.md      |  73 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ web/tests/DashboardView.test.tsx                          |  44 +++++++++++++++++++++++++++-----------
+ web/tests/setup.ts                                        | 100 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 4 files changed, 373 insertions(+), 12 deletions(-)
+```
