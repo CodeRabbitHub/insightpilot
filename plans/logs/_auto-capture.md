@@ -2471,3 +2471,47 @@ Date:   Sat Aug 8 12:04:45 2026 +0530
  plans/logs/_auto-capture.md                               |  27 +++++++++++++++++++++++++++
  2 files changed, 139 insertions(+)
 ```
+
+## Commit at 2026-08-08 12:07
+```
+commit 2565d38d89359bdd7f371e5ab61ba9c26c763247
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 12:07:14 2026 +0530
+
+    Handoff: strictmode-fetch-guard slice done, next brief is App.tsx's matching race
+    
+    Carries forward the discovered-but-deferred App.tsx conversations-list
+    mount effect, which has the identical unguarded StrictMode race just
+    fixed in DashboardView.tsx, as the next slice's full brief.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ HANDOFF.md                  | 379 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-----------------------------------------------------------------------------------
+ plans/logs/_auto-capture.md |  21 ++++++++++
+ 2 files changed, 218 insertions(+), 182 deletions(-)
+```
+
+## Commit at 2026-08-08 12:50
+```
+commit 75c8d2f35c58385f5e0c5492abe07d3fa860e9f6
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 12:50:15 2026 +0530
+
+    Capture: close out the strictmode-fetch-guard handoff commit's auto-log entry
+    
+    The capture_commit hook appended the 2565d38 handoff commit's entry to
+    plans/logs/_auto-capture.md, but no follow-up commit ever picked it up --
+    same loose-end pattern as commit 982f6d7 two slices back. Committed
+    separately to keep it distinguishable from this session's own slice.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-08-app-strictmode-fetch-guard.md | 135 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-08-app-strictmode-fetch-guard.md      | 111 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                                |  20 ++++++++++++
+ web/src/App.tsx                                            |  16 ++++++++--
+ web/tests/App.test.tsx                                     | 245 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 524 insertions(+), 3 deletions(-)
+```

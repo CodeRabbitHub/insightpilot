@@ -162,12 +162,22 @@ function App() {
   const [refreshKey, setRefreshKey] = useState(0)
 
   useEffect(() => {
+    let stale = false
     setLoading(true)
     setError(null)
     fetchConversations()
-      .then(setConversations)
-      .catch((e: unknown) => setError(errorMessage(e)))
-      .finally(() => setLoading(false))
+      .then((data) => {
+        if (!stale) setConversations(data)
+      })
+      .catch((e: unknown) => {
+        if (!stale) setError(errorMessage(e))
+      })
+      .finally(() => {
+        if (!stale) setLoading(false)
+      })
+    return () => {
+      stale = true
+    }
   }, [])
 
   useEffect(() => {
