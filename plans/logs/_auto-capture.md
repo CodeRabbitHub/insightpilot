@@ -2582,3 +2582,54 @@ Date:   Sat Aug 8 13:00:00 2026 +0530
  templates/no-slop.md                                |  9 +++++++++
  4 files changed, 156 insertions(+), 1 deletion(-)
 ```
+
+## Commit at 2026-08-08 13:01
+```
+commit 88df1960efa1b409e034fc38300a0771116d1c41
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 13:01:59 2026 +0530
+
+    Handoff: app-strictmode-fetch-guard slice done, next brief is wiring vitest
+    
+    Records verified state (App.tsx's stale-flag guard, both StrictMode races
+    now fixed across the two files that had them, the mid-session git-history
+    correction) and writes the full brief for the next slice: wire vitest +
+    jsdom into web/package.json (new dependency, explicit sign-off given this
+    session) and get the two simplest existing test files executing for real,
+    deliberately deferring DashboardView.test.tsx/App.test.tsx given their
+    flagged jsdom drag-event/canvas fragility.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ HANDOFF.md                  | 393 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++---------------------------------------------------------------------------------------------
+ plans/logs/_auto-capture.md |  26 ++++++++++++
+ 2 files changed, 207 insertions(+), 212 deletions(-)
+```
+
+## Commit at 2026-08-08 14:12
+```
+commit 7e04895efeb9184dd988dce03cfcb9e5256322f3
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 14:12:52 2026 +0530
+
+    Wire vitest + jsdom into web/, get SqlDetails/FollowUpChips tests running
+    
+    Adds vitest + jsdom devDependencies, a vitest.config.ts (jsdom env, shared
+    react() plugin), and a tests/setup.ts to set IS_REACT_ACT_ENVIRONMENT
+    (closes a no-slop finding: every test warned that act() wasn't supported).
+    SqlDetails.test.tsx and FollowUpChips.test.tsx pass for real (16/16);
+    DashboardView.test.tsx's jsdom canvas/echarts fragility is confirmed and
+    left for a follow-on slice, per brief.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-08-web-vitest-jsdom.md | 102 +++++++++++++++++
+ plans/briefs/2026-08-08-web-vitest-jsdom.md      |  69 ++++++++++++
+ web/package-lock.json                            | 918 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ web/package.json                                 |   7 +-
+ web/tests/setup.ts                               |   4 +
+ web/vitest.config.ts                             |  10 ++
+ 6 files changed, 1107 insertions(+), 3 deletions(-)
+```
