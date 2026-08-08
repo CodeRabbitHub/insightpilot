@@ -2402,3 +2402,24 @@ Date:   Sat Aug 8 02:00:12 2026 +0530
  plans/logs/_auto-capture.md                             | 81 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  2 files changed, 154 insertions(+)
 ```
+
+## Commit at 2026-08-08 12:02
+```
+commit 982f6d7bced5024faeacf7b6b8fe07c9dd470d2f
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 12:02:40 2026 +0530
+
+    Handoff: drag-reposition slice done, next brief is strictmode-fetch-guard
+    
+    Catches up a handoff commit skipped at the end of the drag-reposition
+    session -- HANDOFF.md and the auto-capture log were left uncommitted in
+    the working tree, carrying the StrictMode double-fetch race discovery
+    forward as the next brief.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ HANDOFF.md                  | 364 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++----------------------------------------------------------------------------------
+ plans/logs/_auto-capture.md |  22 +++++++++++
+ 2 files changed, 214 insertions(+), 172 deletions(-)
+```

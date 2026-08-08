@@ -100,6 +100,20 @@
 // unreliable. A third bar-chart card fixture (`THIRD_CARD`) is added so a
 // drag can be exercised against a list where only some siblings' positions
 // shift, in addition to a full-reshuffle case.
+//
+// Extended again per
+// plans/briefs/2026-08-08-dashboard-strictmode-fetch-guard.md with tests
+// for the mount effect's StrictMode double-invoke race: under React 18
+// StrictMode's dev-only double-invoke (or, equivalently and more directly
+// testably here, a `dashboardId` change that re-runs the mount effect
+// before the prior invocation's `fetchDashboard` call has resolved), a
+// stale invocation's late-settling promise must never be allowed to
+// overwrite state a newer invocation has already set. The `deferred()`
+// helper below gives a test control over exactly when a given
+// `fetchDashboard` call settles, independent of when the next
+// render/effect run happens, so a
+// "stale" call's resolution/rejection can be forced to land after its own
+// effect's cleanup has already fired.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createRoot, type Root } from 'react-dom/client'
 import { act } from 'react-dom/test-utils'
@@ -386,6 +400,21 @@ async function dragCardOnto(fromTitle: string, toTitle: string) {
     dispatchDragEvent(toLi, 'dragover', dataTransfer)
     dispatchDragEvent(toLi, 'drop', dataTransfer)
   })
+}
+
+// Resolves/rejects on demand from outside the executor, letting a test
+// control exactly when a given `fetchDashboard` call settles relative to
+// a `dashboardId` change/rerender -- needed to simulate a "stale" call
+// whose own effect's cleanup has already run by the time it resolves, per
+// plans/briefs/2026-08-08-dashboard-strictmode-fetch-guard.md.
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
 }
 
 describe('DashboardView - loading state', () => {
@@ -1230,5 +1259,159 @@ describe('DashboardView - drag-to-reposition, failed persist', () => {
     mockedFetchDashboard.mockClear()
     await dragCardOnto('Orders by category', 'Revenue over time')
     expect(mockedFetchDashboard).not.toHaveBeenCalled()
+  })
+})
+
+// Tests below are from
+// plans/briefs/2026-08-08-dashboard-strictmode-fetch-guard.md.
+//
+// These target the mount `useEffect`'s stale-flag fix directly (rather
+// than driving a real React `<StrictMode>` double-invoke, which this
+// project's render helpers don't currently wrap the component in): a
+// `dashboardId` prop change re-runs the identical effect body React's own
+// StrictMode double-invoke would re-run, and gives a test explicit,
+// deterministic control -- via the `deferred()` helper above -- over
+// which of the two overlapping `fetchDashboard` calls resolves/rejects
+// first. That is exactly the race the brief's stale-flag fix closes: a
+// stale invocation's `.then`/`.catch`/`.finally` must no-op once its own
+// effect's cleanup has already run, whichever invocation happens to
+// settle later in real time.
+describe('DashboardView - StrictMode/rerun fetch guard (stale call ignored)', () => {
+  it('does not render a stale fetchDashboard resolution that lands after dashboardId changed and cleanup ran', async () => {
+    const staleCall = deferred<unknown>()
+    const freshCall = deferred<unknown>()
+    mockedFetchDashboard.mockImplementationOnce(() => staleCall.promise)
+    mockedFetchDashboard.mockImplementationOnce(() => freshCall.promise)
+
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    // Changing dashboardId re-runs the mount effect: the dashboardId=1
+    // invocation's cleanup fires (flipping its own `stale` flag) before
+    // the dashboardId=2 invocation starts its own fetch.
+    await act(async () => {
+      root.render(<DashboardView dashboardId={2} />)
+    })
+
+    await act(async () => {
+      freshCall.resolve(dashboardWithCards([NON_BAR_CARD]))
+    })
+    expect(headingTexts()).toEqual(['Revenue over time'])
+
+    // The stale dashboardId=1 call resolves late -- well after its own
+    // effect's cleanup already ran -- and must be ignored.
+    await act(async () => {
+      staleCall.resolve(dashboardWithCards([BAR_CARD]))
+    })
+
+    expect(headingTexts()).toEqual(['Revenue over time'])
+    expect(headingTexts()).not.toContain('Orders by category')
+  })
+
+  it('does not surface a stale fetchDashboard rejection that lands after dashboardId changed and cleanup ran', async () => {
+    const staleCall = deferred<unknown>()
+    const freshCall = deferred<unknown>()
+    mockedFetchDashboard.mockImplementationOnce(() => staleCall.promise)
+    mockedFetchDashboard.mockImplementationOnce(() => freshCall.promise)
+
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={2} />)
+    })
+
+    await act(async () => {
+      freshCall.resolve(dashboardWithCards([NON_BAR_CARD]))
+    })
+    expect(headingTexts()).toEqual(['Revenue over time'])
+    expect(container.textContent).not.toMatch(/error/i)
+
+    // The stale dashboardId=1 call rejects late -- after its own effect's
+    // cleanup already ran -- and must not surface as an error, nor
+    // replace the already-loaded fresh dashboard.
+    await act(async () => {
+      staleCall.reject(new Error('GET /api/dashboards/1 failed: 500'))
+    })
+
+    expect(container.textContent).not.toMatch(/error/i)
+    expect(headingTexts()).toEqual(['Revenue over time'])
+  })
+
+  it('does not clear the loading indicator or render stale data when the stale call settles before the fresh one, while the fresh call is still pending', async () => {
+    // Distinct from the two tests above (where the stale call settles
+    // AFTER the fresh one already loaded): here the stale call settles
+    // FIRST, while the fresh call is still in flight. Without the
+    // `finally` guard specifically, the stale invocation's
+    // `setLoading(false)` would fire unconditionally and flip the view
+    // out of "loading" while the fresh fetch is still pending -- and
+    // since `setDashboard` would also have fired unguarded, the stale
+    // card would render as if it were the real answer.
+    const staleCall = deferred<unknown>()
+    const freshCall = deferred<unknown>()
+    mockedFetchDashboard.mockImplementationOnce(() => staleCall.promise)
+    mockedFetchDashboard.mockImplementationOnce(() => freshCall.promise)
+
+    await act(async () => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    await act(async () => {
+      root.render(<DashboardView dashboardId={2} />)
+    })
+
+    // The stale dashboardId=1 call settles first -- its own effect's
+    // cleanup already ran when dashboardId changed above.
+    await act(async () => {
+      staleCall.resolve(dashboardWithCards([BAR_CARD]))
+    })
+
+    expect(container.textContent).toMatch(/loading/i)
+    expect(headingTexts()).not.toContain('Orders by category')
+
+    await act(async () => {
+      freshCall.resolve(dashboardWithCards([NON_BAR_CARD]))
+    })
+
+    expect(container.textContent).not.toMatch(/loading/i)
+    expect(headingTexts()).toEqual(['Revenue over time'])
+  })
+})
+
+describe('DashboardView - StrictMode/rerun fetch guard, normal path unaffected', () => {
+  it('still shows loading then loaded exactly once for a normal fetch with no dashboardId change/unmount before it resolves', async () => {
+    const call = deferred<unknown>()
+    mockedFetchDashboard.mockReturnValueOnce(call.promise)
+
+    act(() => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    expect(container.textContent).toMatch(/loading/i)
+    expect(headingTexts()).toEqual([])
+
+    await act(async () => {
+      call.resolve(dashboardWithCards([BAR_CARD]))
+    })
+
+    expect(container.textContent).not.toMatch(/loading/i)
+    expect(headingTexts()).toEqual(['Orders by category'])
+    expect(mockedFetchDashboard).toHaveBeenCalledTimes(1)
+  })
+
+  it('still shows loading then an error exactly once for a normal rejection with no dashboardId change/unmount before it settles', async () => {
+    const call = deferred<unknown>()
+    mockedFetchDashboard.mockReturnValueOnce(call.promise)
+
+    act(() => {
+      root.render(<DashboardView dashboardId={1} />)
+    })
+    expect(container.textContent).toMatch(/loading/i)
+
+    await act(async () => {
+      call.reject(new Error('GET /api/dashboards/1 failed: 500'))
+    })
+
+    expect(container.textContent).not.toMatch(/loading/i)
+    expect(container.textContent).toContain('GET /api/dashboards/1 failed: 500')
+    expect(mockedFetchDashboard).toHaveBeenCalledTimes(1)
   })
 })

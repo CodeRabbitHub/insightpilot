@@ -24,12 +24,22 @@ export function DashboardView({ dashboardId }: { dashboardId: number }) {
   const [draggedCardId, setDraggedCardId] = useState<number | null>(null)
 
   useEffect(() => {
+    let stale = false
     setLoading(true)
     setError(null)
     fetchDashboard(dashboardId)
-      .then(setDashboard)
-      .catch((e: unknown) => setError(errorMessage(e)))
-      .finally(() => setLoading(false))
+      .then((data) => {
+        if (!stale) setDashboard(data)
+      })
+      .catch((e: unknown) => {
+        if (!stale) setError(errorMessage(e))
+      })
+      .finally(() => {
+        if (!stale) setLoading(false)
+      })
+    return () => {
+      stale = true
+    }
   }, [dashboardId])
 
   // Replaces exactly one card via `merge`, leaving every sibling untouched --
