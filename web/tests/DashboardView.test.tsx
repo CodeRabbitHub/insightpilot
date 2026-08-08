@@ -121,13 +121,17 @@ import { deleteCard, fetchDashboard, renameCard, repositionCard, runCard } from 
 import { DashboardView } from '../src/components/DashboardView'
 import { ChartView } from '../src/components/ChartView'
 
-vi.mock('../src/api', () => ({
-  fetchDashboard: vi.fn(),
-  deleteCard: vi.fn(),
-  runCard: vi.fn(),
-  renameCard: vi.fn(),
-  repositionCard: vi.fn(),
-}))
+vi.mock('../src/api', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/api')>()
+  return {
+    ...actual,
+    fetchDashboard: vi.fn(),
+    deleteCard: vi.fn(),
+    runCard: vi.fn(),
+    renameCard: vi.fn(),
+    repositionCard: vi.fn(),
+  }
+})
 
 vi.mock('../src/components/ChartView', async () => {
   const actual =
@@ -387,19 +391,35 @@ function dispatchDragEvent(el: HTMLElement, type: string, dataTransfer: FakeData
   el.dispatchEvent(event)
 }
 
+// Wraps a single drag-event dispatch in its own `act()` call -- see
+// dragCardOnto below for why each event needs its own, rather than one
+// shared, act() block.
+async function actDispatchDragEvent(el: HTMLElement, type: string, dataTransfer: FakeDataTransfer) {
+  await act(async () => {
+    dispatchDragEvent(el, type, dataTransfer)
+  })
+}
+
 // Simulates dragging the card titled `fromTitle` and dropping it onto the
 // card titled `toTitle`'s slot, per the brief's Constraints (native HTML5
 // drag-and-drop: `draggable` + `onDragStart`/`onDragOver`/`onDrop` on each
 // card's `<li>`, no drag-and-drop library).
+//
+// Each event gets its own `act()` call rather than one shared block: a real
+// drag's dragstart/dragover/drop fire as separate browser event-loop ticks,
+// letting onDragStart's `setDraggedCardId` state update commit before drop
+// fires. Dispatching all three synchronously in one act() call (as an
+// earlier version of this helper did) batches that update under React 18's
+// automatic batching, so onDrop's handleDrop would still read the prior
+// render's (null) draggedCardId and bail out before ever calling
+// repositionCard -- confirmed by direct reproduction, not a guess.
 async function dragCardOnto(fromTitle: string, toTitle: string) {
   const fromLi = liForTitle(fromTitle)
   const toLi = liForTitle(toTitle)
   const dataTransfer = new FakeDataTransfer()
-  await act(async () => {
-    dispatchDragEvent(fromLi, 'dragstart', dataTransfer)
-    dispatchDragEvent(toLi, 'dragover', dataTransfer)
-    dispatchDragEvent(toLi, 'drop', dataTransfer)
-  })
+  await actDispatchDragEvent(fromLi, 'dragstart', dataTransfer)
+  await actDispatchDragEvent(toLi, 'dragover', dataTransfer)
+  await actDispatchDragEvent(toLi, 'drop', dataTransfer)
 }
 
 // Resolves/rejects on demand from outside the executor, letting a test
