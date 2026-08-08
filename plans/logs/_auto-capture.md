@@ -2423,3 +2423,30 @@ Date:   Sat Aug 8 12:02:40 2026 +0530
  plans/logs/_auto-capture.md |  22 +++++++++++
  2 files changed, 214 insertions(+), 172 deletions(-)
 ```
+
+## Commit at 2026-08-08 12:03
+```
+commit b0ab67836531e490d3c5a4813d59f099d0d41240
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 12:03:06 2026 +0530
+
+    Guard DashboardView's mount fetch against StrictMode's stale double-invoke
+    
+    A dev-only React 18 StrictMode double-invoke of the mount effect let
+    whichever of two overlapping fetchDashboard calls resolved last silently
+    overwrite state, even after the other had already settled -- discovered
+    during the drag-reposition slice's shipping proof. Adds the same
+    stale-flag cleanup pattern already used by App.tsx's conversation-detail
+    effect, so a stale invocation's late .then/.catch/.finally becomes a
+    no-op once its own cleanup has run.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ artifacts/reviews/2026-08-08-dashboard-strictmode-fetch-guard.md | 136 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/briefs/2026-08-08-dashboard-strictmode-fetch-guard.md      |  89 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                                      |  21 ++++++++++++++++
+ web/src/components/DashboardView.tsx                             |  16 +++++++++---
+ web/tests/DashboardView.test.tsx                                 | 183 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 5 files changed, 442 insertions(+), 3 deletions(-)
+```
