@@ -2450,3 +2450,24 @@ Date:   Sat Aug 8 12:03:06 2026 +0530
  web/tests/DashboardView.test.tsx                                 | 183 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  5 files changed, 442 insertions(+), 3 deletions(-)
 ```
+
+## Commit at 2026-08-08 12:04
+```
+commit 7237854a4e2fd1ef1772be4e01a338512a782780
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 12:04:45 2026 +0530
+
+    Capture: dashboard-strictmode-fetch-guard slice log
+    
+    Records the naming deviation from the brief (stale, not ignore, to match
+    App.tsx's existing guard vocabulary) and carries App.tsx's own
+    conversations-list effect -- the same unguarded race, undiscovered until
+    now -- forward as the next slice.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ plans/logs/2026-08-08-dashboard-strictmode-fetch-guard.md | 112 ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                               |  27 +++++++++++++++++++++++++++
+ 2 files changed, 139 insertions(+)
+```

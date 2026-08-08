@@ -1,87 +1,69 @@
 # Handoff
 
 Date: 2026-08-08
-Slice just completed: plans/briefs/2026-08-08-dashboard-card-drag-reposition.md
-  + plans/logs/2026-08-08-dashboard-card-drag-reposition.md
-  (commit 1cc5574, capture c44ee8e)
+Slice just completed: plans/briefs/2026-08-08-dashboard-strictmode-fetch-guard.md
+  + plans/logs/2026-08-08-dashboard-strictmode-fetch-guard.md
+  (commit b0ab678, capture 7237854)
 
 ## State of the work
 
-- **`web/src/api.ts` gains `repositionCard(id: number, position: number): Promise<DashboardCardDetail>`**:
-  identical shape to `renameCard` — `fetch` with `method: 'PATCH'`,
-  `headers: {'Content-Type': 'application/json'}`,
-  `body: JSON.stringify({ position })`, against `/api/cards/{id}` —
-  throws `Error` with the route + status on failure, resolves with the
-  parsed `DashboardCardDetail` body on success. No new type needed.
-- **`web/src/components/DashboardView.tsx`'s cards are now
-  drag-reorderable** via the native HTML5 drag-and-drop API (no library,
-  per ARCHITECT.md's excluded-deps list): each card's `<li>` is
-  `draggable`, with `onDragStart` (stores the dragged card's id in new
-  `draggedCardId` state, and calls `e.dataTransfer.setData(...)` —
-  required by Firefox to permit starting a drag at all), `onDragOver`
-  (`e.preventDefault()`, required to allow a drop), and `onDrop`
-  (`e.preventDefault()` then `handleDrop(card.id)`). `handleDrop`
-  splices the dragged card out of the local array and back in at the
-  target's index (standard list drag-reorder semantic), renumbers
-  every card's `position` sequentially (0, 1, 2, ...), applies that
-  optimistically to `dashboard.cards`, then calls the new
-  `repositionCard` for every card whose slot's occupant actually
-  changed (not only the dragged card — shifting the dragged card
-  shifts every card between its old and new index too). Reuses the
-  existing shared `actionError` state; on any `repositionCard`
-  rejection, reverts `dashboard.cards` back to the exact pre-drag
-  array.
-- **Accepted tradeoff, decided by the user**: a partial `repositionCard`
-  failure (some of the `Promise.all`'d calls succeed, one rejects) can
-  leave the backend holding some already-persisted new positions while
-  the client reverts its local view to the pre-drag order — the two can
-  drift until the next full page reload. Fixing this properly needs
-  either a backend transactional/batch endpoint (out of scope) or
-  frontend compensating rollback PATCH calls (adds real complexity and
-  its own failure modes). Presented as an explicit choice; the user
-  chose to accept it as a documented known limitation rather than add
-  rollback logic the brief never asked for. First occurrence of this
-  specific tradeoff in the project.
-- **No `onDragEnd` handler**: if a drag is released outside any card, no
-  `onDrop` fires and `draggedCardId` stays set until the next
-  `onDragStart` overwrites it. No observed functional bug (the state is
-  write-only, read only inside `onDrop`) — a deliberate, documented
-  omission rather than defensive code for an unobserved failure mode.
-- **Discovered, NOT fixed (now the next slice): a pre-existing React
-  StrictMode double-fetch race** in `DashboardView`'s original mount
-  `useEffect` (from an earlier slice, unrelated to this one's new
-  code). Under `npm run dev`'s `<StrictMode>` (`web/src/main.tsx`), the
-  effect body runs twice at mount, firing two real `fetchDashboard`
-  HTTP GETs; whichever resolves LAST wins and calls `setDashboard`,
-  even if that's seconds later (this endpoint re-executes every pinned
-  card's SQL on every call, so latency is real and variable —
-  `app/main.py`'s `get_dashboard` docstring). This silently overwrote a
-  completed drag reorder mid-proof and cost real debugging time this
-  session before being correctly identified as pre-existing and
-  unrelated to the new drag code (confirmed by reproducing it with a
-  settle-wait workaround, and by temporary debug logging showing two
-  separate `fetchDashboard` resolutions, the second landing ~2s after
-  the first, with no corresponding second effect-fire log — i.e. it's
-  the FIRST invocation's request resolving late, not a second effect
-  run). Not observable in a production build (StrictMode's double-
-  invoke is dev-only, and `dashboardId` never changes in this app, so
-  production only ever fires the effect once).
-- **No-slop review** (record:
-  `artifacts/reviews/2026-08-08-dashboard-card-drag-reposition.md`): one
-  pass. Fixed: added a one-line comment explaining why
-  `dataTransfer.setData` is called despite nothing reading it back
-  (Firefox drag-start requirement). Accepted as documented exceptions:
-  the DB-drift tradeoff above, and the missing `onDragEnd` handler.
-  Zero unresolved findings at commit time.
-- **New tests added, still cannot execute**: new
-  `web/tests/api.repositionCard.test.ts` (11 cases, mirroring
-  `api.renameCard.test.ts`) and an extended `web/tests/DashboardView.test.tsx`
-  (optimistic reorder before persistence settles, `repositionCard`
-  called with the correct renumbered position for every shifted
-  sibling — not just the dragged card, no call for an unaffected
-  sibling, full revert + `actionError` on any persist failure, no extra
-  `fetchDashboard` call on any path). Same standing gap as every other
-  frontend test file: no vitest/jsdom wired into `web/package.json` yet.
+- **`web/src/components/DashboardView.tsx`'s mount `useEffect` now guards
+  against React 18 StrictMode's dev-only double-invoke**: a local `stale`
+  boolean (`false` at the start of each invocation) is checked before
+  each of `setDashboard`/`setError`/`setLoading` in
+  `.then`/`.catch`/`.finally`, and flipped `true` in the effect's returned
+  cleanup function. This mirrors, exactly, the pattern already used by
+  `web/src/App.tsx`'s conversation-detail effect (lines 173-194) — now
+  the second, independently-verified instance of this pattern in the
+  codebase.
+- **The flag is named `stale`, not `ignore`** — a deliberate deviation
+  from the brief's literal Constraints text (which specified `ignore`,
+  citing React's own docs), caught by the no-slop review's first pass:
+  shipping `ignore` would have left the identical concept named two
+  different ways in the same codebase (`App.tsx` already uses `stale`).
+  Presented to and accepted by the user at Gate 2.
+- **No other part of `DashboardView.tsx` touched** — the action handlers
+  (delete/rerun/rename/drag) and `actionError` are unrelated to this race
+  and were confirmed unaffected by both the diff and the drag-reposition
+  shipping proof re-run against the final code.
+- **New tests added to `web/tests/DashboardView.test.tsx`, still cannot
+  execute** (same standing gap, no vitest/jsdom wired into
+  `web/package.json` yet): three new cases proving (1) a stale
+  `fetchDashboard` resolution landing after cleanup doesn't render, (2) a
+  stale rejection landing after cleanup doesn't surface as an error, (3)
+  a stale resolution landing *before* the fresh one settles — while the
+  fresh call is still pending — doesn't prematurely clear the loading
+  indicator or render stale data (this third case is what actually proves
+  the `setLoading` guard matters; the no-slop review's first pass caught
+  that the original two cases alone couldn't distinguish guarded from
+  unguarded `finally` behavior). Plus two regression cases proving the
+  normal single-invocation loading→loaded and loading→error paths are
+  completely unaffected.
+- **No-slop review, two passes** (record:
+  `artifacts/reviews/2026-08-08-dashboard-strictmode-fetch-guard.md`).
+  Pass 1 found and fixed: the `ignore`→`stale` naming inconsistency; an
+  incidental unrelated reword of a pre-existing test comment (about the
+  Rename button's card-merge semantics) that had been smuggled in by the
+  test-writer agent, reverted byte-for-byte; the `setLoading`-guard test
+  gap described above. Pass 2 found and fixed: a test-file header comment
+  that narrated the session's TDD sequencing ("written BEFORE the fix
+  lands...") rather than describing current behavior, reworded to present
+  tense. Pass 2 clean on every remaining checklist category. Zero
+  unresolved findings at commit time.
+- **Discovered, NOT fixed (now the next slice): `App.tsx`'s
+  conversations-list mount effect** (`web/src/App.tsx:164-171`) has the
+  *identical* unguarded StrictMode double-invoke race this slice just
+  fixed in `DashboardView.tsx` — same missing guard, same fix shape.
+  Found while confirming (per this brief's Out-of-scope) that no other
+  effect in `DashboardView.tsx` itself had the issue; `App.tsx` is a
+  different file, so fixing it there was correctly out of this slice's
+  scope, but it's now a fully-diagnosed, next-smallest slice.
+- **A skipped handoff commit from the prior session was closed out**:
+  `HANDOFF.md` and `plans/logs/_auto-capture.md` had uncommitted content
+  from the end of the drag-reposition slice (that slice's own handoff,
+  written hot but never committed). Committed separately as `982f6d7`
+  ("Handoff: drag-reposition slice done...") before this slice's own
+  commit, to keep the two changes distinguishable in history.
 - **No backend, schema, or dependency changes.**
 
 ## Proof
@@ -93,34 +75,40 @@ $ cd web && npm run build
 
 vite v8.2.0 building client environment for production...
 ✓ 628 modules transformed.
-✓ built in 844ms
+✓ built in 856ms
 ```
-Real-server shipping proof (run against the final diff, after a ~2s
-page-settle wait to avoid the StrictMode race described above — what a
-real user does naturally by looking at the page before dragging):
-created two proof cards via `POST /api/dashboards/1/cards` (id 2305
-"Drag proof First" position 100, id 2306 "Drag proof Second" position
-101) → headless Chromium (Playwright, scratchpad-installed, not added to
-`web/package.json`) dispatched real `dragstart`/`dragover`/`drop` events
-(each its own round-trip, sharing one `DataTransfer`, to match real drag
-timing) dragging "Drag proof Second" onto "Drag proof First"'s slot:
+Real-server shipping proof (dev servers already running from a prior
+session, reused directly). Playwright (scratchpad-installed, not added to
+`web/package.json`) dragging "Race proof Second" onto "Race proof
+First"'s slot, immediately after page load with no settle-wait (the
+opposite of the prior slice's workaround — this slice's whole point is
+that no settle-wait should be needed anymore):
+
+Pre-fix repro (code temporarily reverted via `git stash` to confirm the
+bug is real before trusting the fix):
 ```json
 {
-  "headingsBefore": ["Drag proof First", "Drag proof Second"],
-  "headingsAfter": ["Drag proof Second", "Drag proof First"],
-  "patchRequests": [
-    {"url": "http://localhost:8000/api/cards/2306", "postData": "{\"position\":7}"},
-    {"url": "http://localhost:8000/api/cards/2305", "postData": "{\"position\":8}"}
-  ],
+  "headingsBeforeDrag": ["Race proof First", "Race proof Second"],
+  "headingsRightAfterDrop": ["Race proof Second", "Race proof First"],
+  "headingsAfter6sWait": ["Race proof First", "Race proof Second"],
   "consoleErrors": []
 }
 ```
-→ a fresh `GET /api/dashboards/1` (separate from the browser session)
-confirmed the persisted order: card 2306 at position 7, card 2305 at
-position 8 → proof cards deleted (`DELETE /api/cards/2305`, `/2306` →
-204 each) → dashboard 1 confirmed back to exactly 7 cards, all
-pre-existing pollution from prior sessions, zero new pollution from this
-slice.
+Reorder visibly reverts after ~6s — bug reproduced.
+
+Post-fix confirmation (final code, fresh proof cards, after all no-slop
+fixes):
+```json
+{
+  "headingsBeforeDrag": ["Race proof First", "Race proof Second"],
+  "headingsRightAfterDrop": ["Race proof Second", "Race proof First"],
+  "headingsAfter6sWait": ["Race proof Second", "Race proof First"],
+  "consoleErrors": []
+}
+```
+Reorder survives the full 6-second wait — no revert, zero console errors
+on either run. Proof cards deleted afterward both rounds; dashboard 1
+reconfirmed back to its baseline 7 pre-existing cards each time.
 
 ## Open questions / known issues
 
@@ -161,8 +149,8 @@ slice.
     machine/session — if a session's done-check fails with a Postgres
     connection refusal on port 5433, start Docker Desktop and run
     `docker compose up -d` before assuming a code regression. (Not
-    exercised this session — both the API and web dev servers were
-    already running from a prior session and were reused directly.)
+    exercised this session — the API and web dev servers were already
+    running from a prior session and were reused directly.)
   - The dev Postgres `dashboards`/`dashboard_cards` tables have
     accumulated leftover proof/test cards from prior sessions' real-
     server shipping proofs (harmless; still 7 pre-existing cards,
@@ -172,121 +160,148 @@ slice.
     proofs rather than restarted.
   - A `vite` dev server left running from a prior session (bound on port
     5173) is still up and was reused for this slice's shipping proofs
-    rather than restarted.
+    rather than restarted (its HMR correctly picked up both the
+    ignore→stale rename and the git-stash pre-fix/post-fix round-trip
+    without a manual restart — reconfirmed working this session).
   - `plans/logs/2026-08-07-run-dashboard-card-endpoint.md` still sits
     untracked in the working tree (a leftover from a session several
     slices back whose capture commit was apparently skipped). Still out
     of every subsequent slice's scope; still worth a deliberate small
     cleanup commit eventually.
   - `get_dashboard`'s `ORDER BY DashboardCard.position` (`app/main.py:380`)
-    still has no secondary sort key. Observed informally this session:
-    the 7 pre-existing same-position(0) cards' relative order stayed
-    consistent across many repeated `GET`s during testing — but this is
-    an observation, not a guarantee from Postgres, and still worth a
-    secondary `id`/`created_at` tiebreaker if it's ever seen to vary.
+    still has no secondary sort key. Still just an observation, not
+    fixed; still worth a secondary `id`/`created_at` tiebreaker if it's
+    ever seen to matter.
   - Playwright (transient, per this project's established pattern for
     real-browser proofs) cannot be resolved via `npx -p playwright node
     script.mjs` because `npx -p` doesn't add the package to Node's ESM
-    resolution path — installing it into a throwaway `npm init` directory
-    (e.g. the session scratchpad) and running the script from there does
-    work; reconfirmed working again this session.
+    resolution path — a throwaway scratchpad install (from a prior
+    session, `pw-drag/`) was reused directly this session, confirming
+    that pattern's install persists usably across sessions as long as
+    the scratchpad directory itself survives.
   - Native HTML5 drag-and-drop events dispatched synthetically must each
     go in their own round-trip/turn (not fired back-to-back synchronously
     in one script block) to give React's batching a chance to commit
-    state between them — discovered this session while building the
-    drag-reposition shipping proof; documented here so the next session
-    driving simulated drag events doesn't have to rediscover it.
+    state between them — reconfirmed working this session via the reused
+    `pw-drag/race-proof.mjs` script.
+  - The DB-drift-on-partial-`repositionCard`-failure tradeoff from the
+    drag-reposition slice remains an accepted, documented known
+    limitation — not tracked as a bug to fix.
 - New this slice:
-  - The React StrictMode double-fetch race described above in "State of
-    the work" — now this handoff's next brief.
-  - The DB-drift-on-partial-`repositionCard`-failure tradeoff, accepted
-    as a documented known limitation (see "State of the work" above) —
-    not tracked as a bug to fix, just a known, accepted behavior.
+  - `App.tsx`'s conversations-list mount effect has the identical
+    unguarded StrictMode race — now this handoff's next brief (see
+    below). Its sibling effect in the same file (the conversation-detail
+    fetch, lines 173-194) already has the correct `stale`-flag guard and
+    does NOT need this fix.
+  - A skipped handoff commit from the drag-reposition slice was found and
+    closed out this session (commit `982f6d7`) — worth checking for at
+    the start of a session if `git status` shows unexpected `HANDOFF.md`/
+    `plans/logs/_auto-capture.md` modifications before assuming they're
+    this session's own in-progress edits.
 
 ## Next slice (the brief, written NOW while context is hot)
 
 Goal:
-Fix `DashboardView.tsx`'s mount effect so React 18 StrictMode's dev-only
-double-invoke can never let a stale duplicate `fetchDashboard` response
-overwrite newer state.
+Fix `App.tsx`'s conversations-list mount effect so React 18 StrictMode's
+dev-only double-invoke can never let a stale duplicate `fetchConversations`
+response overwrite newer state — the same bug class just fixed in
+`DashboardView.tsx`, in a different file.
 
 Constraints:
-- Touch only `web/src/components/DashboardView.tsx`'s existing mount
-  `useEffect` (currently lines ~26-32) — no backend change, no new
-  dependency, no change to any other part of the component (the action
-  handlers — delete/rerun/rename/drag — and `actionError` are unrelated
-  to this race and stay untouched).
-- Use the standard ignore-flag cleanup pattern (React's own documented
-  fix for exactly this class of race, from "Fetching data with
-  Effects"): a local `ignore` boolean, `false` at the start of each
-  effect invocation, flipped to `true` in the effect's returned cleanup
-  function, checked before each of `setDashboard`/`setError`/
-  `setLoading` fires in the `.then`/`.catch`/`.finally` handlers — so a
-  stale invocation's eventual resolution can never mutate state once
-  that invocation's own cleanup has already run.
-- Do not switch to `AbortController` instead — functionally equivalent
-  for this specific bug, but would require changing `fetchDashboard`'s
-  signature to accept a signal, a larger surface change than this fix
-  needs.
+- Touch only `web/src/App.tsx`'s conversations-list `useEffect` (currently
+  lines ~164-171) — no backend change, no new dependency, no change to
+  any other part of `App.tsx` (the conversation-detail effect at lines
+  173-194 already has the correct guard and must not be touched;
+  `ConversationList`, `ConversationDetailView`, message-sending, and view
+  switching are unrelated to this race and stay untouched).
+- Use the exact `stale`-flag pattern already established in this same
+  file's conversation-detail effect (lines 173-194) — mirror its shape
+  precisely (local `stale` boolean, `false` at the start, checked before
+  each of `setConversations`/`setError`/`setLoading` in
+  `.then`/`.catch`/`.finally`, flipped `true` in the effect's cleanup).
+  This is now the third instance of this exact pattern in the codebase
+  (App.tsx's own detail effect, DashboardView.tsx's mount effect); match
+  it, don't reinvent a variant.
+- Do not switch to `AbortController`.
 - No visible behavior change for the normal path: a real mount (in
-  production, where StrictMode's double-invoke doesn't happen and
-  `dashboardId` never changes in this app) must still show exactly one
-  loading → loaded (or loading → error) transition, identical to today.
+  production, where StrictMode's double-invoke doesn't happen) must still
+  show exactly one loading → loaded (or loading → error) transition,
+  identical to today.
 
 Inputs:
-- `web/src/components/DashboardView.tsx`'s current mount effect:
+- `web/src/App.tsx`'s current conversations-list mount effect:
   ```ts
   useEffect(() => {
     setLoading(true)
     setError(null)
-    fetchDashboard(dashboardId)
-      .then(setDashboard)
+    fetchConversations()
+      .then(setConversations)
       .catch((e: unknown) => setError(errorMessage(e)))
       .finally(() => setLoading(false))
-  }, [dashboardId])
+  }, [])
   ```
-- This handoff's "State of the work" section above, which documents the
-  exact bug trace from this session's debugging (two real
-  `fetchDashboard` GETs fire at mount under StrictMode; whichever
-  resolves last wins and silently overwrites any local state changed in
-  the meantime, since `get_dashboard`'s real per-card SQL re-execution
-  makes response latency real and variable).
-- `web/src/main.tsx` — confirms `<StrictMode>` wraps the app, which is
-  why this only reproduces in dev, not in a production build.
+- `web/src/App.tsx`'s own conversation-detail effect (lines 173-194) as
+  the exact template to mirror — it already solves this identical problem
+  correctly, in the same file.
+- `web/src/components/DashboardView.tsx`'s now-fixed mount effect (this
+  slice, commit `b0ab678`) as a second precedent, plus its test file
+  (`web/tests/DashboardView.test.tsx`'s "StrictMode/rerun fetch guard"
+  describe blocks) as the pattern for how to test this without a real
+  `<StrictMode>`-wrapped render.
+- Note: unlike `DashboardView`'s effect (keyed on a changeable
+  `dashboardId` prop, which let tests force a second invocation via a
+  prop change), this effect's dependency array is `[]` — it only ever
+  re-runs via StrictMode's own double-invoke, not via any prop/state
+  change. A unit test proving the guard will need a different mechanism
+  to force two overlapping invocations (e.g. unmounting and remounting
+  the component between two fetches, or directly testing the effect's
+  cleanup-then-late-resolution shape the same way the DashboardView tests
+  did, adapted for a no-deps effect) — work this out during implementation
+  rather than assuming the exact same test-authoring trick transfers
+  unchanged.
 
 Outputs:
-- The same mount effect, with the ignore-flag pattern added exactly as
-  described in Constraints.
-- Test coverage (new, from the brief — same standing execution gap as
-  every other frontend test in this repo, no vitest/jsdom wired in yet)
-  proving: a `fetchDashboard` promise that resolves AFTER the effect's
-  cleanup has run does not call `setDashboard`/`setError`/`setLoading`;
-  the normal single-invocation path (fetch resolves, no cleanup in
-  between) is completely unaffected — loading → loaded and loading →
-  error both still work exactly as before.
+- The same effect, with the `stale`-flag guard added exactly as described
+  in Constraints.
+- New test coverage (no existing `web/tests/App.test.tsx` file exists yet
+  — this slice creates one, scoped ONLY to this mount effect's race, not
+  a full `App.tsx` test suite) proving: a `fetchConversations` promise
+  that resolves or rejects AFTER the effect's cleanup has run does not
+  call `setConversations`/`setError`/`setLoading`; the normal
+  single-invocation path (fetch resolves, no cleanup in between) is
+  completely unaffected. Same standing execution gap as every other
+  frontend test in this repo (no vitest/jsdom wired in yet).
 
 Done-check:
 `cd web && npm run build` (type-checks and builds cleanly) plus a
-real-server shipping proof under the dev server (StrictMode active):
-reproduce this session's exact failure mode first on the pre-fix code
-(drag a card immediately after page load, with no settle-wait, and
-confirm it still reverts a few seconds later — establishing the bug is
-real and reproducible), then confirm the same drag on the fixed code
-survives past 5+ seconds without reverting. Confirm no console errors on
-either run.
+real-server shipping proof under the dev server (StrictMode active).
+Unlike the `dashboardId`-keyed effect this slice's predecessor fixed,
+this effect's `[]` dependency array means the only way to force two
+overlapping real invocations is StrictMode's own mount/cleanup/remount —
+so the live proof needs a way to make the two duplicate real
+`GET /api/conversations` requests return distinguishably different data
+(e.g. Playwright route interception: delay the first-fired request's
+response past the second's, and have the two responses differ in a
+checkable way — such as one reflecting a conversation created via a real
+API call in between the two requests firing) and confirm the pre-fix code
+ends up displaying the delayed-but-first request's (stale) data while the
+fixed code displays the second request's (fresh) data. Confirm no console
+errors on either run.
 
 Out-of-scope:
-- Any other part of `DashboardView.tsx` (action handlers, `actionError`,
-  drag logic) — untouched, this is a mount-effect-only fix.
-- Switching to `AbortController` — the ignore-flag pattern is the
-  minimal fix per this brief's Constraints.
-- Auditing or fixing this same shape anywhere else in the codebase, even
-  if it exists elsewhere — confirm no other effect in this file has the
-  issue while implementing, but a repo-wide sweep for the same pattern
-  is its own separate slice if warranted.
-- Making `dashboardId` a dynamic, routing-driven prop — unrelated to
-  this bug, still a hardcoded `1` throughout the app.
-- The DB-drift-on-partial-failure tradeoff from the drag-reposition
-  slice — a separate, already-decided, accepted limitation, not a bug.
+- `App.tsx`'s conversation-detail effect (lines 173-194) — already
+  correctly guarded, not touched.
+- `ConversationList`, `ConversationDetailView`, message-sending
+  (`handleSubmit`), and view-switching (`view`/`setView`) — unrelated to
+  this race.
+- Switching to `AbortController` — the `stale`-flag pattern is the
+  minimal, already-twice-proven fix per this brief's Constraints.
+- A full `App.tsx` test suite — the new test file this slice creates is
+  scoped only to the mount effect's race, matching this project's
+  established one-brief-one-file-of-tests-at-a-time discipline.
+- Auditing or fixing this same shape anywhere else in the codebase beyond
+  `App.tsx`'s two effects (both already accounted for: one fixed here,
+  one already correct) — a repo-wide sweep is its own separate slice if
+  ever warranted.
 - The orphaned `plans/logs/2026-08-07-run-dashboard-card-endpoint.md`
   cleanup — unrelated file, separate housekeeping slice.
