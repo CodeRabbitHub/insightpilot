@@ -2380,3 +2380,25 @@ Date:   Sat Aug 8 01:58:37 2026 +0530
  web/tests/api.repositionCard.test.ts                           | 125 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
  6 files changed, 736 insertions(+), 2 deletions(-)
 ```
+
+## Commit at 2026-08-08 02:00
+```
+commit c44ee8e658ffc18f3579f7861a402f1d4330e04f
+Author: ng-aman <aman.roland@ngenux.com>
+Date:   Sat Aug 8 02:00:12 2026 +0530
+
+    Capture: dashboard-card-drag-reposition slice log
+    
+    Records the accepted DB-drift-on-partial-failure tradeoff (client
+    reverts locally, backend keeps already-persisted writes -- accepted as
+    a documented limitation rather than adding compensating rollback), and
+    the pre-existing React StrictMode double-fetch race discovered while
+    building the shipping proof, carried forward as the next slice.
+    
+    Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_01T6g35o355V3DM81DsRLWoW
+
+ plans/logs/2026-08-08-dashboard-card-drag-reposition.md | 73 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ plans/logs/_auto-capture.md                             | 81 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 154 insertions(+)
+```
